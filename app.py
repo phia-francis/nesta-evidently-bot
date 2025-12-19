@@ -112,6 +112,67 @@ def handle_archive(ack, body, client, logger):
     except Exception as e:
         logger.error(f"Error in handle_archive action: {e}")
 
+@app.command("/evidently-link-doc")
+def link_google_doc(ack, body, client):
+    """
+    Links a Google Doc (Assumption Log) to the user's project.
+    """
+    ack()
+    user_id = body["user_id"]
+    text = body.get("text", "").strip()
+    
+    # 1. Extract File ID
+    file_id = drive_service.extract_id_from_url(text)
+    if not file_id:
+        client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text="❌ Invalid Google Doc URL.")
+        return
+
+    # 2. Store in DB (Update your Supabase 'projects' table to have a 'drive_file_id' column)
+    # db_service.update_project_doc(user_id, file_id) 
+    # For now, we mock the success:
+    
+    client.chat_postMessage(
+        channel=user_id,
+        text=f"✅ *Google Doc Linked!* \nI can now read from this document to update your dashboard.\n\n*Next Step:* Share the document with my email: `evidently-bot@YOUR-PROJECT.iam.gserviceaccount.com`"
+    )
+
+@app.action("trigger_evidence_sync")
+def handle_sync(ack, body, client):
+    """
+    Reads the linked Google Doc, extracts assumptions via Gemini, and updates DB.
+    """
+    ack()
+    user_id = body['user']['id']
+    
+    # 1. Notify User (Loading State)
+    client.chat_postMessage(channel=user_id, text="🔄 *Syncing with Google Drive...* reading your assumption log.")
+    
+    # 2. Fetch File ID from DB
+    # project = db_service.get_project(user_id)
+    # file_id = project.get('drive_file_id')
+    
+    # HARDCODED FOR DEMO (Replace with DB fetch)
+    file_id = "1x_YOUR_TEST_DOC_ID_HERE" 
+
+    # 3. Get Content from Drive
+    doc_text = drive_service.get_file_content(file_id)
+    
+    if not doc_text:
+        client.chat_postMessage(channel=user_id, text="⚠️ *Error:* I couldn't access the file. Did you share it with my service account email?")
+        return
+
+    # 4. Analyze with Gemini
+    # We reuse the structured analysis logic
+    analysis = ai_service.analyze_thread_structured(doc_text)
+    
+    # 5. Save to DB
+    # db_service.save_assumptions(analysis['assumptions'])
+    
+    client.chat_postMessage(
+        channel=user_id, 
+        text=f"✅ *Sync Complete!*\nFound {len(analysis.get('assumptions', []))} assumptions in your doc. Check the Home Tab."
+    )
+
 @app.action("gen_experiment_modal")
 def handle_gen_experiment(ack, body, client, logger):
     """Generates AI experiment suggestions for an assumption"""
@@ -138,6 +199,7 @@ def handle_gen_experiment(ack, body, client, logger):
         )
     except Exception as e:
         logger.error(f"Error in handle_gen_experiment action: {e}")
+    
         
 # --- 5. START ---
 if __name__ == "__main__":
