@@ -33,7 +33,7 @@ def update_home_tab(client, event, logger):
 
 # --- 2. 'SO WHAT?' AI SUMMARISER ---
 @app.event("app_mention")
-def handle_mention(body, say, client):
+def handle_mention(body, say, client, logger):
     """
     Listens for @Evidently mentions.
     Fetches thread history and uses Gemini to summarize and extract OCP assumptions.
@@ -61,11 +61,13 @@ def handle_mention(body, say, client):
             blocks=get_ai_summary_block(analysis),
             text="Here is the analysis of the discussion."
         )
-        client.reactions_remove(channel=channel_id, name="eyes", timestamp=event["ts"])
         client.reactions_add(channel=channel_id, name="white_check_mark", timestamp=event["ts"])
 
     except Exception as e:
+        logger.error(f"Error analyzing thread: {e}")
         say(f"Sorry, I stumbled while analyzing that: {str(e)}")
+    finally:
+        client.reactions_remove(channel=channel_id, name="eyes", timestamp=event["ts"])
 
 # --- 3. ACTIVE PERSISTENCE (Nudge Command) ---
 @app.command("/evidently-nudge")
