@@ -18,7 +18,7 @@ class Config:
 class Brand:
     # Nesta Core Palette
     BLUE = "#0000FF"      # Core Blue
-    TEAL = "#0FA3A4"      # "Green" in your file, close to teal
+    TEAL = "#0FA3A4"      
     AMBER = "#FFB703"     # "Yellow/Orange" equivalent for CTAs
     NAVY = "#072033"      # "Navy" for text/headers
     WHITE = "#FFFFFF"
