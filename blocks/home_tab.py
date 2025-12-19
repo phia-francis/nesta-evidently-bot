@@ -1,6 +1,7 @@
 def get_home_view(project_data):
     assumptions = project_data.get('assumptions', [])
     experiments = project_data.get('experiments', [])
+    current_focus = project_data.get('current_focus', 'No current focus defined.')
     
     # Helper to filter assumptions by category
     def get_by_cat(cat):
@@ -18,7 +19,7 @@ def get_home_view(project_data):
         {"type": "divider"},
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": "*Current Focus:* Validating user intake pathways."}
+            "text": {"type": "mrkdwn", "text": f"*Current Focus:* {current_focus}"}
         },
         {"type": "divider"},
         # OCP Grid Visualization
