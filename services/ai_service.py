@@ -31,15 +31,17 @@ class EvidenceAI:
             response = self.model.generate_content(prompt)
             return response.text
         except Exception as e:
-            return f":warning: AI Analysis failed: {str(e)}"
+            logging.error(f"AI analysis failed: {e}", exc_info=True)
+            return ":warning: AI Analysis failed. Our engineers have been notified."
 
     def generate_experiment_suggestions(self, assumption: str) -> str:
         """
         Suggests an experiment method for a given assumption.
         """
-        prompt = f'Given the assumption: "{assumption}", suggest 3 rapid test methods (e.g., Interviews, Fake Door, Prototype) to validate it within 2 weeks.'
+        prompt = f"Given the assumption: '{assumption}', suggest 3 rapid test methods (e.g., Interviews, Fake Door, Prototype) to validate it within 2 weeks."
         try:
             response = self.model.generate_content(prompt)
             return response.text
         except Exception as e:
+            logging.error(f"Failed to generate experiment suggestions: {e}", exc_info=True)
             return "Could not generate experiments."
