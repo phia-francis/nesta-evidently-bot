@@ -113,28 +113,10 @@ def handle_archive(ack, body, client, logger):
         logger.error(f"Error in handle_archive action: {e}")
 
 @app.command("/evidently-link-doc")
-def link_google_doc(ack, body, client):
+def link_google_doc(ack, body, client, logger):
     """
     Links a Google Doc (Assumption Log) to the user's project.
     """
-    ack()
-    user_id = body["user_id"]
-    text = body.get("text", "").strip()
-    
-    # 1. Extract File ID
-    file_id = drive_service.extract_id_from_url(text)
-    if not file_id:
-        client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text="❌ Invalid Google Doc URL.")
-        return
-
-    # 2. Store in DB (Update your Supabase 'projects' table to have a 'drive_file_id' column)
-    # db_service.update_project_doc(user_id, file_id) 
-    # For now, we mock the success:
-    
-    client.chat_postMessage(
-        channel=user_id,
-        text=f"✅ *Google Doc Linked!* \nI can now read from this document to update your dashboard.\n\n*Next Step:* Share the document with my email: `{Config.SERVICE_ACCOUNT_EMAIL}`"
-    )
 
 @app.action("trigger_evidence_sync")
 def handle_sync(ack, body, client):
