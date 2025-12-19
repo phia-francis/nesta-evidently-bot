@@ -105,14 +105,17 @@ def handle_keep(ack, body, client, logger):
         logger.error(f"Error in handle_keep action: {e}")
 
 @app.action("archive_assumption")
-def handle_archive(ack, body, client):
+def handle_archive(ack, body, client, logger):
     ack()
-    user_id = body['user']['id']
-    assumption_id = body['actions'][0]['value']
-    
-    db_service.update_assumption_status(assumption_id, "archived")
-    
-    client.chat_postMessage(channel=user_id, text=f"🗑️ Assumption {assumption_id} archived.")
+    try:
+        user_id = body['user']['id']
+        assumption_id = body['actions'][0]['value']
+        
+        db_service.update_assumption_status(assumption_id, "archived")
+        
+        client.chat_postMessage(channel=user_id, text=f"🗑️ Assumption {assumption_id} archived.")
+    except Exception as e:
+        logger.error(f"Error in handle_archive action: {e}")
 
 @app.action("gen_experiment_modal")
 def handle_gen_experiment(ack, body, client):
