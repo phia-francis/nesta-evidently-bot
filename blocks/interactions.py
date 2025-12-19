@@ -1,4 +1,7 @@
 def get_nudge_block(assumption: dict) -> list:
+def get_nudge_block(assumption):
+    if not all(k in assumption for k in ('id', 'text')):
+        raise ValueError("Assumption dictionary must contain 'id' and 'text' keys.")
     return [
         {
             "type": "section",
