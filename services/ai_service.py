@@ -37,7 +37,7 @@ class EvidenceAI:
         """
         Suggests an experiment method for a given assumption.
         """
-        prompt = f"Given the assumption: '{assumption}', suggest 3 rapid test methods (e.g., Interviews, Fake Door, Prototype) to validate it within 2 weeks."
+        prompt = f'Given the assumption: "{assumption}", suggest 3 rapid test methods (e.g., Interviews, Fake Door, Prototype) to validate it within 2 weeks.'
         try:
             response = self.model.generate_content(prompt)
             return response.text
