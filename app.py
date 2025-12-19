@@ -92,14 +92,17 @@ def trigger_nudge(ack, body, client):
 
 # --- 4. ACTION HANDLERS (Interactivity) ---
 @app.action("keep_assumption")
-def handle_keep(ack, body, client):
+def handle_keep(ack, body, client, logger):
     ack()
-    user_id = body['user']['id']
-    assumption_id = body['actions'][0]['value']
-    
-    db_service.update_assumption_status(assumption_id, "active")
-    
-    client.chat_postMessage(channel=user_id, text=f"✅ Assumption {assumption_id} marked as active.")
+    try:
+        user_id = body['user']['id']
+        assumption_id = body['actions'][0]['value']
+        
+        db_service.update_assumption_status(assumption_id, "active")
+        
+        client.chat_postMessage(channel=user_id, text=f"✅ Assumption {assumption_id} marked as active.")
+    except Exception as e:
+        logger.error(f"Error in handle_keep action: {e}")
 
 @app.action("archive_assumption")
 def handle_archive(ack, body, client):
