@@ -52,78 +52,7 @@ def handle_mention(body, say, client, logger):
 
         # AI Analysis
         analysis = ai_service.analyze_thread(full_text)
-        
-        # Reply
-        client.chat_postMessage(
-            channel=channel_id,
-            thread_ts=thread_ts,
-            blocks=get_ai_summary_block(analysis),
-            text="Here is the analysis of the discussion."
-        )
-        client.reactions_add(channel=channel_id, name="white_check_mark", timestamp=event["ts"])
-
-    except Exception as e:
-        logger.error(f"Error analyzing thread: {e}")
-        say(f"Sorry, I stumbled while analyzing that: {str(e)}")
-    finally:
-        client.reactions_remove(channel=channel_id, name="eyes", timestamp=event["ts"])
-
-# --- 3. ACTIVE PERSISTENCE (Nudge Command) ---
-@app.command("/evidently-nudge")
-def trigger_nudge(ack, body, client):
-    """
-    Identifies stale assumptions (older than 14 days) and prompts the team.
-    """
-    ack()
-    user_id = body["user_id"]
-    
-    # 1. Fetch Stale Data via DB Service
-    # In a real scenario, db_service.get_stale_assumptions() checks 'last_verified_at'
-    stale_assumptions = db_service.get_stale_assumptions(days=14)  # TODO: Replace 14 with a constant like STALE_ASSUMPTION_DAYS
-    
-    if not stale_assumptions:
-        client.chat_postEphemeral(
-            channel=body['channel_id'], 
-            user=user_id, 
-            text="🌱 Everything is fresh! No stale assumptions found."
-        )
-        return
-
-    # 2. Build Interactive Nudge Message
-    blocks = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": "⏰ Time to Revisit"}
-        },
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn", 
-                "text": "The following assumptions haven't been tested in 2 weeks. "
-                        "According to the *Test & Learn framework*, we should validate or archive them."
-            }
-        }
-    ]
-
-    for assump in stale_assumptions:
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn", 
-                "text": f"> *{assump['text']}*\n_Confidence: {assump['confidence']}%_"
-            },
-            "accessory": {
-                "type": "overflow",
-                "options": [
-                    {"text": {"type": "plain_text", "text": "Generate Experiment"}, "value": f"gen_{assump['id']}"},
-                    {"text": {"type": "plain_text", "text": "Mark Validated"}, "value": f"val_{assump['id']}"},
-                    {"text": {"type": "plain_text", "text": "Archive"}, "value": f"arch_{assump['id']}"}
-                ],
-                "action_id": "nudge_action"
-            }
-        })
-
-    client.chat_postMessage(channel=user_id, blocks=blocks)
+null
 
 # --- 4. ACTION HANDLERS (Interactivity) ---
 @app.action("keep_assumption")
