@@ -152,7 +152,8 @@ def handle_sync(ack, body, client):
     # file_id = project.get('drive_file_id')
     
     # HARDCODED FOR DEMO (Replace with DB fetch)
-    file_id = "1x_YOUR_TEST_DOC_ID_HERE" 
+    project = db_service.get_project(user_id)
+    file_id = project.get('drive_file_id')
 
     # 3. Get Content from Drive
     doc_text = drive_service.get_file_content(file_id)
