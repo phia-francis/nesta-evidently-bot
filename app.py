@@ -133,7 +133,7 @@ def link_google_doc(ack, body, client):
     
     client.chat_postMessage(
         channel=user_id,
-        text=f"✅ *Google Doc Linked!* \nI can now read from this document to update your dashboard.\n\n*Next Step:* Share the document with my email: `evidently-bot@YOUR-PROJECT.iam.gserviceaccount.com`"
+        text=f"✅ *Google Doc Linked!* \nI can now read from this document to update your dashboard.\n\n*Next Step:* Share the document with my email: `{Config.SERVICE_ACCOUNT_EMAIL}`"
     )
 
 @app.action("trigger_evidence_sync")
