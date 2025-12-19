@@ -79,7 +79,7 @@ def trigger_nudge(ack, body, client):
     
     # 1. Fetch Stale Data via DB Service
     # In a real scenario, db_service.get_stale_assumptions() checks 'last_verified_at'
-    stale_assumptions = db_service.get_stale_assumptions(days=14)
+    stale_assumptions = db_service.get_stale_assumptions(days=14)  # TODO: Replace 14 with a constant like STALE_ASSUMPTION_DAYS
     
     if not stale_assumptions:
         client.chat_postEphemeral(
