@@ -67,5 +67,5 @@ class DriveService:
             if "/d/" in url:
                 return url.split("/d/")[1].split("/")[0]
             return url # Assume it is the ID if no URL structure found
-        except:
+except Exception:
             return None
