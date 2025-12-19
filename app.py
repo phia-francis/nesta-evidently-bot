@@ -55,6 +55,35 @@ def handle_mention(body, say, client, logger):
 null
 
 # --- 4. ACTION HANDLERS (Interactivity) ---
+@app.action("nudge_action")
+def handle_nudge_action(ack, body, client, logger):
+    ack()
+    user_id = body["user"]["id"]
+    action_value = body["actions"][0]["value"]
+    
+    try:
+        action_type, assumption_id = action_value.split("_", 1)
+        
+        if action_type == "gen":
+            # TODO: Implement logic to generate experiment for assumption_id
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"Generating experiment for assumption {assumption_id}...")
+            logger.info(f"User {user_id} requested experiment generation for assumption {assumption_id}")
+        elif action_type == "val":
+            # TODO: Implement logic to mark assumption_id as validated
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"Marking assumption {assumption_id} as validated...")
+            logger.info(f"User {user_id} marked assumption {assumption_id} as validated")
+        elif action_type == "arch":
+            # TODO: Implement logic to archive assumption_id
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"Archiving assumption {assumption_id}...")
+            logger.info(f"User {user_id} archived assumption {assumption_id}")
+        else:
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text="Unknown action type.")
+            logger.warning(f"Unknown action type '{action_type}' for assumption {assumption_id} from user {user_id}")
+            
+    except Exception as e:
+        logger.error(f"Error handling nudge action for user {user_id}, value {action_value}: {e}")
+        client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"An error occurred while processing your request: {e}")
+
 @app.action("keep_assumption")
 def handle_keep(ack, body, client, logger):
     ack()
