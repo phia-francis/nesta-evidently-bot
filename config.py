@@ -12,5 +12,5 @@ class Config:
     SUPABASE_KEY = os.environ["SUPABASE_KEY"]
     
     # Thresholds
-    CONFIDENCE_THRESHOLD = 0.8
-    STALE_DAYS = 14
+    CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", 0.8))
+    STALE_DAYS = int(os.environ.get("STALE_DAYS", 14))
