@@ -1,3 +1,5 @@
+import json
+import logging
 import google.generativeai as genai
 from config import Config
 
@@ -14,33 +16,36 @@ class EvidenceAI:
         genai.configure(api_key=Config.GOOGLE_API_KEY)
         self.model = genai.GenerativeModel(_GEMINI_MODEL_NAME)
 
-    def analyze_thread(self, conversation_text: str) -> str:
+    def analyze_thread_structured(self, conversation_text: str) -> dict:
         """
-        Analyzes a Slack thread to extract insights based on the OCP framework.
+        Analyzes a thread and extracts structured OCP data.
         """
         prompt = f"""
-        You are an expert Innovation Consultant for Nesta. Analyze the following Slack conversation.
+        You are a Senior Innovation Consultant at Nesta. Analyze this Slack thread.
         
-        Your Goal: Answer the "So What?".
-        
-        Output Structure:
-        1. **Summary**: A 1-sentence summary of the discussion.
-        2. **Key Decisions**: Bullet points of what was agreed.
-        3. **OCP Extraction**: Identify any assumptions mentioned and map them to:
-           - Opportunity (Value/Market)
-           - Capability (Feasibility/Resources)
-           - Progress (Metrics/Sustainability)
-        
+        Extract the following in JSON format:
+        1. "summary": A concise "So What?" summary (British English).
+        2. "decisions": List of agreed actions.
+        3. "assumptions": A list of objects with:
+            - "text": The assumption statement.
+            - "category": One of "Opportunity", "Capability", "Progress".
+            - "confidence": Integer 0-100 based on evidence mentioned.
+            - "status": "stale" if no recent evidence, else "active".
+
         Conversation:
         {conversation_text}
         """
         
         try:
             response = self.model.generate_content(prompt)
-            return response.text
+            response_text = response.text
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logging.error(f"AI Analysis - Failed to parse JSON: {e}. Response text: '{response_text}'", exc_info=True)
+            return {"error": "Could not analyze thread due to invalid format."}
         except Exception as e:
-            logging.error(f"AI analysis failed: {e}", exc_info=True)
-            return ":warning: AI Analysis failed. Our engineers have been notified."
+            logging.error(f"AI Analysis - General failure: {e}", exc_info=True)
+            return {"error": "Could not analyze thread."}
 
     def generate_experiment_suggestions(self, assumption: str) -> str:
         """
