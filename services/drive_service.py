@@ -34,7 +34,7 @@ class DriveService:
             document = self.docs_service.documents().get(documentId=file_id).execute()
             content = document.get('body').get('content')
             return self._read_structural_elements(content)
-        except Exception as e:
+        except HttpError as e:
             logger.error(f"Failed to read Google Doc {file_id}: {e}")
             return None
 
