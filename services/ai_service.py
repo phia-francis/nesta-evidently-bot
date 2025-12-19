@@ -4,7 +4,15 @@ from config import Config
 class EvidenceAI:
     def __init__(self):
         genai.configure(api_key=Config.GOOGLE_API_KEY)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+import google.generativeai as genai
+from config import Config
+
+_GEMINI_MODEL_NAME = 'gemini-1.5-flash'
+
+class EvidenceAI:
+    def __init__(self):
+        genai.configure(api_key=Config.GOOGLE_API_KEY)
+        self.model = genai.GenerativeModel(_GEMINI_MODEL_NAME)
 
     def analyze_thread(self, conversation_text: str) -> str:
         """
