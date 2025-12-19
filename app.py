@@ -51,13 +51,14 @@ def handle_mention(body, say, client, logger):
         full_text = "\n".join([f"{m.get('user')}: {m.get('text')}" for m in messages])
 
         # AI Analysis
-        analysis = ai_service.analyze_thread(full_text)
-        
+        analysis = ai_service.analyze_thread_structured(full_text)
+
+        summary_text = analysis.get("summary", "No summary available.") # Safely get the summary
         # Reply
         client.chat_postMessage(
             channel=channel_id,
             thread_ts=thread_ts,
-            blocks=get_ai_summary_block(analysis),
+            blocks=get_ai_summary_block(summary_text),
             text="Here is the analysis of the discussion."
         )
         client.reactions_add(channel=channel_id, name="white_check_mark", timestamp=event["ts"])
