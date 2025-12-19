@@ -10,58 +10,68 @@ def get_home_view(project_data):
     caps = "\n".join(get_by_cat("Capability")) or "No active assumptions."
     prog = "\n".join(get_by_cat("Progress")) or "No active assumptions."
 
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"Evidently Dashboard: {project_data.get('name', 'Unnamed Project')}"}
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "*Current Focus:* Validating user intake pathways."}
+        },
+        {"type": "divider"},
+        # OCP Grid Visualization
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "🎯 Opportunity (Value)"}
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": opps}
+        },
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "⚙️ Capability (Feasibility)"}
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": caps}
+        },
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "📈 Progress (Sustainability)"}
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": prog}
+        },
+        {"type": "divider"},
+        # Active Experiments Section
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "⚗️ Active Experiments"}
+        },
+    ]
+
+    if experiments:
+        exp = experiments[0]
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*{exp['name']}*\nMetric: {exp['metric']}"},
+            "accessory": {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "View Results"},
+                "action_id": "view_experiment_results"
+            }
+        })
+    else:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "No active experiments."}
+        })
+
     return {
         "type": "home",
-        "blocks": [
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": f"Evidently Dashboard: {project_data['name']}"}
-            },
-            {"type": "divider"},
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "*Current Focus:* Validating user intake pathways."}
-            },
-            {"type": "divider"},
-            # OCP Grid Visualization
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": "🎯 Opportunity (Value)"}
-            },
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": opps}
-            },
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": "⚙️ Capability (Feasibility)"}
-            },
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": caps}
-            },
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": "📈 Progress (Sustainability)"}
-            },
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": prog}
-            },
-            {"type": "divider"},
-            # Active Experiments Section
-            {
-                "type": "header",
-                "text": {"type": "plain_text", "text": "⚗️ Active Experiments"}
-            },
-             {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*{experiments[0]['name']}*\nMetric: {experiments[0]['metric']}"},
-                "accessory": {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "View Results"},
-                    "action_id": "view_experiment_results"
-                }
-            }
-        ]
+        "blocks": blocks
     }
