@@ -118,29 +118,32 @@ def handle_archive(ack, body, client, logger):
         logger.error(f"Error in handle_archive action: {e}")
 
 @app.action("gen_experiment_modal")
-def handle_gen_experiment(ack, body, client):
+def handle_gen_experiment(ack, body, client, logger):
     """Generates AI experiment suggestions for an assumption"""
     ack()
-    assumption_text = body['actions'][0]['value']
-    trigger_id = body['trigger_id']
+    try:
+        assumption_text = body['actions'][0]['value']
+        trigger_id = body['trigger_id']
 
-    # AI Generation
-    suggestions = ai_service.generate_experiment_suggestions(assumption_text)
+        # AI Generation
+        suggestions = ai_service.generate_experiment_suggestions(assumption_text)
 
-    # Open Modal with results
-    client.views_open(
-        trigger_id=trigger_id,
-        view={
-            "type": "modal",
-            "title": {"type": "plain_text", "text": "Experiment Ideas"},
-            "blocks": [
-                {"type": "section", "text": {"type": "mrkdwn", "text": f"Suggestions for: *{assumption_text}*"}},
-                {"type": "divider"},
-                {"type": "section", "text": {"type": "mrkdwn", "text": suggestions}}
-            ]
-        }
-    )
-
+        # Open Modal with results
+        client.views_open(
+            trigger_id=trigger_id,
+            view={
+                "type": "modal",
+                "title": {"type": "plain_text", "text": "Experiment Ideas"},
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": f"Suggestions for: *{assumption_text}*"}},
+                    {"type": "divider"},
+                    {"type": "section", "text": {"type": "mrkdwn", "text": suggestions}}
+                ]
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error in handle_gen_experiment action: {e}")
+        
 # --- 5. START ---
 if __name__ == "__main__":
     handler = SocketModeHandler(app, Config.SLACK_APP_TOKEN)
