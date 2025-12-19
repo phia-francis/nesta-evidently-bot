@@ -1,4 +1,4 @@
-def get_nudge_block(assumption):
+def get_nudge_block(assumption: dict) -> list:
     return [
         {
             "type": "section",
