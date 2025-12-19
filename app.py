@@ -52,50 +52,38 @@ def handle_mention(body, say, client, logger):
 
         # AI Analysis
         analysis = ai_service.analyze_thread(full_text)
-        
-        # Reply
-        client.chat_postMessage(
-            channel=channel_id,
-            thread_ts=thread_ts,
-            blocks=get_ai_summary_block(analysis),
-            text="Here is the analysis of the discussion."
-        )
-        client.reactions_add(channel=channel_id, name="white_check_mark", timestamp=event["ts"])
-
-    except Exception as e:
-        logger.error(f"Error analyzing thread: {e}")
-        say(f"Sorry, I stumbled while analyzing that: {str(e)}")
-    finally:
-        client.reactions_remove(channel=channel_id, name="eyes", timestamp=event["ts"])
-
-# --- 3. ACTIVE PERSISTENCE (Nudge Command) ---
-@app.command("/evidently-nudge")
-def trigger_nudge(ack, body, client, logger):
-    """
-    Manually triggers the 'Stale Assumption' check.
-    In production, this would be a scheduled Cron job.
-    """
-    ack()
-    user_id = body["user_id"]
-    try:
-        stale_items = db_service.get_stale_assumptions()
-
-        if not stale_items:
-            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text="All assumptions are fresh! Great job.")
-            return
-
-        # Send Nudge for the first stale item found
-        item = stale_items[0]
-        client.chat_postMessage(
-            channel=user_id,
-            text="You have stale assumptions to review.",
-            blocks=get_nudge_block(item)
-        )
-    except Exception as e:
-        logger.error(f"Error in /evidently-nudge command: {e}")
-        client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"An error occurred: {e}")
+null
 
 # --- 4. ACTION HANDLERS (Interactivity) ---
+@app.action("nudge_action")
+def handle_nudge_action(ack, body, client, logger):
+    ack()
+    user_id = body["user"]["id"]
+    action_value = body["actions"][0]["value"]
+    
+    try:
+        action_type, assumption_id = action_value.split("_", 1)
+        
+        if action_type == "gen":
+            # TODO: Implement logic to generate experiment for assumption_id
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"Generating experiment for assumption {assumption_id}...")
+            logger.info(f"User {user_id} requested experiment generation for assumption {assumption_id}")
+        elif action_type == "val":
+            # TODO: Implement logic to mark assumption_id as validated
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"Marking assumption {assumption_id} as validated...")
+            logger.info(f"User {user_id} marked assumption {assumption_id} as validated")
+        elif action_type == "arch":
+            # TODO: Implement logic to archive assumption_id
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"Archiving assumption {assumption_id}...")
+            logger.info(f"User {user_id} archived assumption {assumption_id}")
+        else:
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text="Unknown action type.")
+            logger.warning(f"Unknown action type '{action_type}' for assumption {assumption_id} from user {user_id}")
+            
+    except Exception as e:
+        logger.error(f"Error handling nudge action for user {user_id}, value {action_value}: {e}")
+        client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"An error occurred while processing your request: {e}")
+
 @app.action("keep_assumption")
 def handle_keep(ack, body, client, logger):
     ack()
