@@ -75,7 +75,83 @@ def get_home_view(user_id, project_data):
         chart_url = ChartService.generate_progress_ring(progress_score, "Confidence")
     except Exception as e:
         logger.error(f"Chart generation failed: {e}")
-        chart_url = "https://via.placeholder.com/300?text=Evidently" # Fallback
+import logging
+from config import Brand
+# Assuming chart_service is created as per architectural plan
+from services.chart_service import ChartService 
+
+logger = logging.getLogger(__name__)
+
+# Constants for UI Text
+NO_ASSUMPTIONS_TEXT = "_No assumptions logged yet. What risks are we taking?_"
+SECTION_DIVIDER = {"type": "divider"}
+FALLBACK_CHART_URL = "https://via.placeholder.com/300?text=Evidently" # Define fallback chart URL as a constant
+
+def _get_confidence_emoji(score):
+    """Returns a visual indicator based on confidence score."""
+    if score >= 80:
+        return "🟢" # High confidence
+    elif score >= 50:
+        return "🟡" # Needs validation
+    return "🔴"     # Critical assumption (Low confidence)
+
+def _generate_assumption_row(assumption):
+    """
+    Creates a detailed row for a single assumption.
+    Uses 'context' blocks to display metadata (confidence/status) subtly.
+    """
+    status_icon = "❄️" if assumption.get('status') == 'stale' else "🔥"
+    conf_emoji = _get_confidence_emoji(assumption.get('confidence', 0))
+    
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"{conf_emoji} *{assumption['text']}*"
+            },
+            "accessory": {
+                "type": "overflow",
+                "action_id": "assumption_overflow",
+                "options": [
+                    {"text": {"type": "plain_text", "text": "View Evidence"}, "value": f"view_{assumption['id']}"},
+                    {"text": {"type": "plain_text", "text": "Generate Test"}, "value": f"test_{assumption['id']}"},
+                    {"text": {"type": "plain_text", "text": "Archive"}, "value": f"archive_{assumption['id']}"}
+                ]
+            }
+        },
+        {
+            "type": "context",
+            "elements": [
+                {"type": "mrkdwn", "text": f"Confidence: *{assumption.get('confidence', 0)}%*"},
+                {"type": "mrkdwn", "text": f"| Status: {status_icon} {assumption.get('status', 'active').title()}"},
+                {"type": "mrkdwn", "text": f"| Uploaded: {assumption.get('date_logged', 'Unknown')}"}
+            ]
+        }
+    ]
+
+def get_home_view(user_id, project_data):
+    """
+    Generates the Home Tab JSON payload.
+    Features:
+    1. Dynamic Progress Ring (Visual Identity).
+    2. OCP Framework Sections.
+    3. Active Experiment Monitors.
+    """
+    blocks = []
+    
+    # Extract Data
+    assumptions = project_data.get('assumptions', [])
+    experiments = project_data.get('experiments', [])
+    progress_score = project_data.get('progress_score', 0) # Calculated aggregate score
+    
+    # --- 1. HEADER & VISUAL DASHBOARD ---
+    # We generate a dynamic chart URL on the fly
+    try:
+        chart_url = ChartService.generate_progress_ring(progress_score, "Confidence")
+    except Exception as e:
+        logger.error(f"Chart generation failed: {e}")
+        chart_url = FALLBACK_CHART_URL # Use the defined constant for fallback URL
 
     blocks.extend([
         {
