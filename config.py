@@ -14,3 +14,17 @@ class Config:
     # Thresholds
     CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", 0.8))
     STALE_DAYS = int(os.environ.get("STALE_DAYS", 14))
+
+class BrandColor(str, Enum):
+    """Nesta Core Palette colors."""
+    BLUE = "#0000FF"
+    TEAL = "#0FA3A4"
+    AMBER = "#FFB703"
+    NAVY = "#072033"
+    WHITE = "#FFFFFF"
+
+class BrandTheme(str, Enum):
+    """Semantic color mapping for OCP Framework."""
+    OPPORTUNITY = BrandColor.AMBER
+    CAPABILITY = BrandColor.TEAL
+    PROGRESS = BrandColor.BLUE
