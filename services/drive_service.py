@@ -40,20 +40,25 @@ class DriveService:
 
     def _read_structural_elements(self, elements):
         """Recursively extracts text from the confusing Google Docs JSON structure."""
-        text = ''
+        text_parts = []
+        if not elements:
+            return ""
+
         for value in elements:
             if 'paragraph' in value:
-                elements = value.get('paragraph').get('elements')
-                for elem in elements:
-                    text += elem.get('textRun', {}).get('content', '')
+                paragraph = value.get('paragraph', {})
+                para_elements = paragraph.get('elements', [])
+                for elem in para_elements:
+                    text_parts.append(elem.get('textRun', {}).get('content', ''))
             elif 'table' in value:
                 # Basic table support: flatten the text
-                table = value.get('table')
-                for row in table.get('tableRows'):
-                    for cell in row.get('tableCells'):
-                        text += self._read_structural_elements(cell.get('content')) + " | "
-                    text += "\n"
-        return text
+                table = value.get('table', {})
+                for row in table.get('tableRows', []):
+                    for cell in row.get('tableCells', []):
+                        text_parts.append(self._read_structural_elements(cell.get('content', [])))
+                        text_parts.append(" | ")
+                    text_parts.append("\n")
+        return "".join(text_parts)
 
     def extract_id_from_url(self, url: str) -> str:
         """Parses a Google Doc URL to find the File ID."""
