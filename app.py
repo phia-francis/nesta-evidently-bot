@@ -120,41 +120,45 @@ def link_google_doc(ack, body, client, logger):
 
 @app.action("trigger_evidence_sync")
 def handle_sync(ack, body, client):
+def handle_sync(ack, body, client, logger):
     """
     Reads the linked Google Doc, extracts assumptions via Gemini, and updates DB.
     """
     ack()
     user_id = body['user']['id']
     
-    # 1. Notify User (Loading State)
-    client.chat_postMessage(channel=user_id, text="🔄 *Syncing with Google Drive...* reading your assumption log.")
-    
-    # 2. Fetch File ID from DB
-    # project = db_service.get_project(user_id)
-    # file_id = project.get('drive_file_id')
-    
-    # HARDCODED FOR DEMO (Replace with DB fetch)
-    project = db_service.get_project(user_id)
-    file_id = project.get('drive_file_id')
+    try:
+        # 1. Notify User (Loading State)
+        client.chat_postMessage(channel=user_id, text="🔄 *Syncing with Google Drive...* reading your assumption log.")
+        
+        # 2. Fetch File ID from DB
+        # project = db_service.get_project(user_id)
+        # file_id = project.get('drive_file_id')
+        
+        # HARDCODED FOR DEMO (Replace with DB fetch)
+        file_id = "1x_YOUR_TEST_DOC_ID_HERE" 
 
-    # 3. Get Content from Drive
-    doc_text = drive_service.get_file_content(file_id)
-    
-    if not doc_text:
-        client.chat_postMessage(channel=user_id, text="⚠️ *Error:* I couldn't access the file. Did you share it with my service account email?")
-        return
+        # 3. Get Content from Drive
+        doc_text = drive_service.get_file_content(file_id)
+        
+        if not doc_text:
+            client.chat_postMessage(channel=user_id, text="⚠️ *Error:* I couldn't access the file. Did you share it with my service account email?")
+            return
 
-    # 4. Analyze with Gemini
-    # We reuse the structured analysis logic
-    analysis = ai_service.analyze_thread_structured(doc_text)
-    
-    # 5. Save to DB
-    # db_service.save_assumptions(analysis['assumptions'])
-    
-    client.chat_postMessage(
-        channel=user_id, 
-        text=f"✅ *Sync Complete!*\nFound {len(analysis.get('assumptions', []))} assumptions in your doc. Check the Home Tab."
-    )
+        # 4. Analyze with Gemini
+        # We reuse the structured analysis logic
+        analysis = ai_service.analyze_thread_structured(doc_text)
+        
+        # 5. Save to DB
+        # db_service.save_assumptions(analysis['assumptions'])
+        
+        client.chat_postMessage(
+            channel=user_id, 
+            text=f"✅ *Sync Complete!\nFound {len(analysis.get('assumptions', []))} assumptions in your doc. Check the Home Tab."
+        )
+    except Exception as e:
+        logger.error(f"Error in handle_sync action: {e}")
+        client.chat_postMessage(channel=user_id, text="❌ *Sync Failed:* An unexpected error occurred during synchronization. Please try again later.")
 
 @app.action("gen_experiment_modal")
 def handle_gen_experiment(ack, body, client, logger):
