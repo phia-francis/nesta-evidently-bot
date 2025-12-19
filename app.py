@@ -2,6 +2,8 @@ import logging
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from config import Config
+from services.drive_service import DriveService
+drive_service = DriveService()
 
 # Services
 from services.ai_service import EvidenceAI
