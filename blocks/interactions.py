@@ -37,7 +37,15 @@ def get_nudge_block(assumption):
         }
     ]
 
-def get_ai_summary_block(ai_text):
+def get_ai_summary_block(ai_text: str) -> list:
+    """Generates Slack blocks for an AI summary.
+
+    Args:
+        ai_text: The text of the AI analysis.
+
+    Returns:
+        A list of dictionaries representing Slack Block Kit UI elements.
+    """
     return [
         {
             "type": "section",
