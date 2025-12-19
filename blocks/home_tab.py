@@ -192,7 +192,7 @@ def get_home_view(user_id, project_data):
         "elements": [
             {
                 "type": "image",
-                "image_url": "https://nesta-logo-url.com/favicon.png", # Replace with actual hosted Nesta asset
+                "image_url": Brand.NESTA_LOGO_URL,
                 "alt_text": "Nesta"
             },
             {"type": "mrkdwn", "text": "Powered by *Evidently* | Nesta's Test & Learn Toolkit"}
