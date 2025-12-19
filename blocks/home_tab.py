@@ -8,12 +8,14 @@ logger = logging.getLogger(__name__)
 # Constants for UI Text
 NO_ASSUMPTIONS_TEXT = "_No assumptions logged yet. What risks are we taking?_"
 SECTION_DIVIDER = {"type": "divider"}
+CONFIDENCE_HIGH_THRESHOLD = 80
+CONFIDENCE_MEDIUM_THRESHOLD = 50
 
 def _get_confidence_emoji(score):
     """Returns a visual indicator based on confidence score."""
-    if score >= 80:
+    if score >= CONFIDENCE_HIGH_THRESHOLD:
         return "🟢" # High confidence
-    elif score >= 50:
+    elif score >= CONFIDENCE_MEDIUM_THRESHOLD:
         return "🟡" # Needs validation
     return "🔴"     # Critical assumption (Low confidence)
 
