@@ -71,26 +71,30 @@ def handle_mention(body, say, client, logger):
 
 # --- 3. ACTIVE PERSISTENCE (Nudge Command) ---
 @app.command("/evidently-nudge")
-def trigger_nudge(ack, body, client):
+def trigger_nudge(ack, body, client, logger):
     """
     Manually triggers the 'Stale Assumption' check.
     In production, this would be a scheduled Cron job.
     """
     ack()
     user_id = body["user_id"]
-    stale_items = db_service.get_stale_assumptions()
+    try:
+        stale_items = db_service.get_stale_assumptions()
 
-    if not stale_items:
-        client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text="All assumptions are fresh! Great job.")
-        return
+        if not stale_items:
+            client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text="All assumptions are fresh! Great job.")
+            return
 
-    # Send Nudge for the first stale item found
-    item = stale_items[0]
-    client.chat_postMessage(
-        channel=user_id,
-        text="You have stale assumptions to review.",
-        blocks=get_nudge_block(item)
-    )
+        # Send Nudge for the first stale item found
+        item = stale_items[0]
+        client.chat_postMessage(
+            channel=user_id,
+            text="You have stale assumptions to review.",
+            blocks=get_nudge_block(item)
+        )
+    except Exception as e:
+        logger.error(f"Error in /evidently-nudge command: {e}")
+        client.chat_postEphemeral(channel=body['channel_id'], user=user_id, text=f"An error occurred: {e}")
 
 # --- 4. ACTION HANDLERS (Interactivity) ---
 @app.action("keep_assumption")
