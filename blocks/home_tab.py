@@ -6,9 +6,9 @@ def get_home_view(project_data):
     def get_by_cat(cat):
         return [f"• {a['text']} ({a['status']})" for a in assumptions if a['category'] == cat]
 
-    opps = "\n".join(get_by_cat("Opportunity")) or "No active assumptions."
-    caps = "\n".join(get_by_cat("Capability")) or "No active assumptions."
-    prog = "\n".join(get_by_cat("Progress")) or "No active assumptions."
+    opps = "\n".join(get_by_cat(OPPORTUNITY_CATEGORY)) or NO_ASSUMPTIONS_TEXT
+    caps = "\n".join(get_by_cat(CAPABILITY_CATEGORY)) or NO_ASSUMPTIONS_TEXT
+    prog = "\n".join(get_by_cat(PROGRESS_CATEGORY)) or NO_ASSUMPTIONS_TEXT
 
     blocks = [
         {
