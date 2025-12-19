@@ -38,9 +38,13 @@ class EvidenceAI:
         
         try:
             response = self.model.generate_content(prompt)
-            return json.loads(response.text)
+            response_text = response.text
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logging.error(f"AI Analysis - Failed to parse JSON: {e}. Response text: '{response_text}'", exc_info=True)
+            return {"error": "Could not analyze thread due to invalid format."}
         except Exception as e:
-            logging.error(f"AI Analysis Failed: {e}")
+            logging.error(f"AI Analysis - General failure: {e}", exc_info=True)
             return {"error": "Could not analyze thread."}
 
     def generate_experiment_suggestions(self, assumption: str) -> str:
