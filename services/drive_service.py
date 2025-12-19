@@ -25,7 +25,7 @@ class DriveService:
             info, scopes=self.SCOPES
         )
 
-    def get_file_content(self, file_id: str) -> str:
+    def get_file_content(self, file_id: str) -> str | None:
         """
         Fetches text content from a Google Doc.
         """
