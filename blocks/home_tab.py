@@ -1,4 +1,4 @@
-def get_home_view(user_name, project_data):
+def get_home_view(project_data):
     assumptions = project_data.get('assumptions', [])
     experiments = project_data.get('experiments', [])
     
