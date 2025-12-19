@@ -242,7 +242,7 @@ def get_home_view(user_id, project_data):
     else:
         for exp in experiments:
             # Simulate a status check logic
-            is_success = exp.get('current_metric', 0) >= exp.get('target_metric', 100)
+            is_success = exp.get('current_metric', 0) >= exp.get('target_metric', DEFAULT_TARGET_METRIC)
             status_emoji = "✅" if is_success else "⚠️"
             
             blocks.append({
