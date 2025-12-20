@@ -229,7 +229,7 @@ def render_team_workspace() -> List[dict]:
 
 
 def _calculate_average_confidence(assumptions: Iterable[dict]) -> int:
-    active_scores = [a.get("confidence_score", a.get("confidence", 0)) for a in assumptions if a.get("status") != "archived"]
+    active_scores = [a.get("confidence_score") or a.get("confidence") or 0 for a in assumptions if a.get("status") != "archived"]
     if not active_scores:
         return 0
     return round(sum(active_scores) / len(active_scores))
