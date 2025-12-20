@@ -90,8 +90,11 @@ def render_overview_workspace(user_id: str, project_data: dict) -> List[dict]:
             },
         },
         {"type": "divider"},
-        {"type": "header", "text": {"type": "plain_text", "text": "Inbox • AI suggestions"}},
     ]
+
+    blocks.extend(_project_canvas_blocks(project_data))
+
+    blocks.append({"type": "header", "text": {"type": "plain_text", "text": "Inbox • AI suggestions"}})
 
     ai_suggestions = project_data.get("ai_suggestions") or []
     if not ai_suggestions:
@@ -180,7 +183,7 @@ def render_experiments_workspace(project_data: dict) -> List[dict]:
     for exp in experiments:
         current = exp.get("current_metric", 0)
         target = exp.get("target_metric", 0)
-status_emoji = "🟢" if current >= target else "🟡" if current >= target * _EXPERIMENT_WARN_THRESHOLD else "🔴"
+        status_emoji = "🟢" if current >= target else "🟡" if current >= target * _EXPERIMENT_WARN_THRESHOLD else "🔴"
         blocks.append(
             {
                 "type": "section",
@@ -226,6 +229,110 @@ def render_team_workspace() -> List[dict]:
     ]
     blocks.append(_next_step_footer("Invite the team to score the riskiest assumption."))
     return blocks
+
+
+def _project_canvas_blocks(project_data: dict) -> List[dict]:
+    """High-fidelity canvas view for Opportunity/Capability/Progress."""
+    canvas_blocks: List[dict] = [
+        {"type": "header", "text": {"type": "plain_text", "text": "Project Canvas"}},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Current Focus:* " + project_data.get("name", "New Project"),
+            },
+        },
+        {"type": "divider"},
+    ]
+
+    lanes = [
+        ("Opportunity", "🟡", "Do people want this?", "opportunity"),
+        ("Capability", "🟢", "Can we build it?", "capability"),
+        ("Progress", "🔵", "Should we do it?", "progress"),
+    ]
+
+    assumptions = project_data.get("assumptions", [])
+    for label, icon, prompt, key in lanes:
+        canvas_blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"{icon} *{label}*"}]})
+        matching = [a for a in assumptions if a.get("category") == key]
+        if not matching:
+            canvas_blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"_No {label.lower()} assumptions yet._\n{prompt}"},
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "+ Add"},
+                        "value": f"add_{key}",
+                        "action_id": "open_new_assumption_modal",
+                    },
+                }
+            )
+            continue
+
+        for assumption in matching:
+            confidence = assumption.get("confidence_score") or assumption.get("confidence") or 0
+            try:
+                ring_url = ChartService.generate_progress_ring(int(confidence), "Confidence")
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Confidence ring failed: %s", exc)
+                ring_url = FALLBACK_CHART_URL
+
+            text = assumption.get("text", prompt)
+            assumption_id = assumption.get("id") or text[:75]
+            canvas_blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": text},
+                    "accessory": {
+                        "type": "image",
+                        "image_url": ring_url,
+                        "alt_text": "Confidence ring",
+                    },
+                }
+            )
+            canvas_blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "overflow",
+                            "action_id": "assumption_overflow",
+                            "options": [
+                                {
+                                    "text": {"type": "plain_text", "text": "Move to Roadmap"},
+                                    "value": f"roadmap::{assumption_id}",
+                                },
+                                {
+                                    "text": {"type": "plain_text", "text": "Design Experiment"},
+                                    "value": f"experiment::{assumption_id}",
+                                },
+                                {
+                                    "text": {"type": "plain_text", "text": "Archive"},
+                                    "value": f"archive::{assumption_id}",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            )
+        canvas_blocks.append({"type": "divider"})
+
+    try:
+        chart_url = ChartService.generate_progress_ring(project_data.get("progress_score", 0), "Confidence")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Canvas chart generation failed: %s", exc)
+        chart_url = FALLBACK_CHART_URL
+
+    canvas_blocks.append(
+        {
+            "type": "image",
+            "image_url": chart_url,
+            "alt_text": "Progress Ring",
+        }
+    )
+
+    return canvas_blocks
 
 
 def _calculate_average_confidence(assumptions: Iterable[dict]) -> int:
