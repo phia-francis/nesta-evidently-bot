@@ -311,30 +311,12 @@ def draft_plan(ack, body, respond, logger):
             respond("Google Workspace is not configured.")
             return
         context = body.get("text", "").strip()
-        plan_content = textwrap.dedent(
-            f"""
-            # Project Plan
-            Context: {context or 'No extra context provided.'}
-
-            ## Define
-            {knowledge_base.FRAMEWORK_STAGES['define']}
-
-            ## Shape Systems
-            {knowledge_base.FRAMEWORK_STAGES['shape systems']}
-
-            ## Develop
-            {knowledge_base.FRAMEWORK_STAGES['develop']}
-
-            ## Refine
-            {knowledge_base.FRAMEWORK_STAGES['refine']}
-
-            ## Evaluate
-            {knowledge_base.FRAMEWORK_STAGES['evaluate']}
-
-            ## Diffuse and Scale
-            {knowledge_base.FRAMEWORK_STAGES['diffuse and scale']}
-            """
-        ).strip()
+        plan_content = (
+            f"# Project Plan\nContext: {context or 'No extra context provided.'}\n\n"
+            + "\n\n".join(
+                [f"## {stage.title()}\n{desc}" for stage, desc in knowledge_base.FRAMEWORK_STAGES.items()]
+            )
+        )
         link = google_workspace_service.create_doc("Project Plan", plan_content)
         if not link:
             respond("I couldn't draft the plan right now.")
