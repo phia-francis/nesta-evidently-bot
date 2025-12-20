@@ -27,18 +27,3 @@ def method_cards(stage: str) -> List[dict]:
             }
         )
     return blocks
-
-
-def case_study_modal(method: str) -> dict:
-    case = knowledge_base.get_case_study(method)
-    description = case or "Case study not found."
-    return {
-        "type": "modal",
-        "callback_id": "case_study_modal",
-        "title": {"type": "plain_text", "text": "Case Study"},
-        "close": {"type": "plain_text", "text": "Close"},
-        "blocks": [
-            {"type": "header", "text": {"type": "plain_text", "text": method}},
-            {"type": "section", "text": {"type": "mrkdwn", "text": description}},
-        ],
-    }
