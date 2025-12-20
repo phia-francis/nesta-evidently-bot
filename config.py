@@ -34,7 +34,7 @@ class Brand:
     # OCP Semantic Mapping
     COLOR_OPPORTUNITY = NESTA_AMBER
     COLOR_CAPABILITY = NESTA_TEAL
-    COLOR_PROGRESS = NESTA_BLUE
+    COLOR_PROGRESS = NESTA_NAVY
 
     # Fonts (Image generation only)
     FONT_HEADLINE = "Zosia Display"
