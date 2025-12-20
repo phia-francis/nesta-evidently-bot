@@ -105,10 +105,11 @@ async def handle_mention(body, say, client, logger):  # noqa: ANN001
         messages = history["messages"]
         full_text = "\n".join([f"{m.get('user')}: {m.get('text')}" for m in messages])
 
-        attachments = []
-        for message in messages:
-            for file in message.get("files", []) or []:
-                attachments.append({"name": file.get("name"), "mimetype": file.get("mimetype")})
+        attachments = [
+            {"name": file.get("name"), "mimetype": file.get("mimetype")}
+            for message in messages
+            for file in message.get("files", []) or []
+        ]
 
         # Use run_in_executor for the synchronous AI service call to avoid blocking the event loop
         loop = asyncio.get_running_loop()
