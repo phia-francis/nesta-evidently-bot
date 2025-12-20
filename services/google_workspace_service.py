@@ -126,7 +126,12 @@ class GoogleWorkspaceService:
 
     def _share_file(self, file_id: str, email: str, role: str = "writer") -> None:
         try:
-            drive_service = build("drive", "v3", credentials=self.creds)
+            logger.error("Unexpected error creating slides", exc_info=True)
+            return None
+
+    def _share_file(self, file_id: str, email: str, role: str = "writer") -> None:
+        try:
+            drive_service = self.drive_service
             drive_service.permissions().create(
                 fileId=file_id,
                 body={"type": "user", "role": role, "emailAddress": email},
