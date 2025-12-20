@@ -1,60 +1,93 @@
 import json
 import logging
-import google.generativeai as genai
-from config import Config
+import re
+from typing import Iterable
 
-class EvidenceAI:
-    def __init__(self):
-        genai.configure(api_key=Config.GOOGLE_API_KEY)
 import google.generativeai as genai
-from config import Config
 
-_GEMINI_MODEL_NAME = 'gemini-1.5-flash'
+from config import Category, Config
+from services import knowledge_base
+
+logger = logging.getLogger(__name__)
+
+_GEMINI_MODEL_NAME = "gemini-1.5-flash"
+_TEMPERATURE = 0.2
+
+_PII_REGEX = re.compile(r"([\w.-]+@[\w.-]+)|(\+?\d[\d\s-]{7,}\d)")
+
 
 class EvidenceAI:
     def __init__(self):
         genai.configure(api_key=Config.GOOGLE_API_KEY)
         self.model = genai.GenerativeModel(_GEMINI_MODEL_NAME)
 
-    def analyze_thread_structured(self, conversation_text: str) -> dict:
-        """
-        Analyzes a thread and extracts structured OCP data.
-        """
-        prompt = f"""
-        You are a Senior Innovation Consultant at Nesta. Analyze this Slack thread.
-        
-        Extract the following in JSON format:
-        1. "summary": A concise "So What?" summary (British English).
-        2. "decisions": List of agreed actions.
-        3. "assumptions": A list of objects with:
-            - "text": The assumption statement.
-            - "category": One of "Opportunity", "Capability", "Progress".
-            - "confidence": Integer 0-100 based on evidence mentioned.
-            - "status": "stale" if no recent evidence, else "active".
+    @staticmethod
+    def redact_pii(text: str) -> str:
+        return _PII_REGEX.sub("[redacted]", text)
 
-        Conversation:
-        {conversation_text}
-        """
-        
+    def analyze_thread_structured(self, conversation_text: str, attachments: Iterable[dict] | None = None) -> dict:
+        """Analyse a Slack thread or document and return structured OCP data."""
+        attachment_context = ""
+        if attachments:
+            formatted = [f"- {att.get('name')} ({att.get('mimetype', 'unknown type')})" for att in attachments]
+            attachment_context = "\nAttachments available:\n" + "\n".join(formatted)
+
+        prompt = f"""
+You are Evidently, Nesta's Test & Learn assistant. Respond in strict JSON using British English for free text.
+Reference Playbook: {knowledge_base.FRAMEWORK_STAGES}
+Methods Toolkit: {knowledge_base.METHODS_TOOLKIT}
+Case Studies: {knowledge_base.CASE_STUDIES}
+Keys: summary (string), key_decision (boolean), action_items (array of strings), emergent_assumptions (array of strings), assumptions (array of objects).
+Each assumption object must include: id (stable hash or slug), text, category (one of {Category.OPPORTUNITY.value}, {Category.CAPABILITY.value}, {Category.PROGRESS.value}), confidence_score (integer 0-100), status ("active" or "stale"), provenance_source (string e.g. meeting name), source_id (string identifier), last_verified_at (ISO8601 string or null).
+Conversation:
+{conversation_text}
+{attachment_context}
+"""
+
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
             response_text = response.text
-            return json.loads(response_text)
-        except json.JSONDecodeError as e:
-            logging.error(f"AI Analysis - Failed to parse JSON: {e}. Response text: '{response_text}'", exc_info=True)
-            return {"error": "Could not analyze thread due to invalid format."}
-        except Exception as e:
-            logging.error(f"AI Analysis - General failure: {e}", exc_info=True)
-            return {"error": "Could not analyze thread."}
+            parsed = json.loads(response_text)
+            for assumption in parsed.get("assumptions", []):
+                assumption["text"] = self.redact_pii(assumption.get("text", ""))
+            return parsed
+        except json.JSONDecodeError as exc:
+            logger.error("AI Analysis - Failed to parse JSON", exc_info=True)
+            return {"error": f"Could not analyse thread due to invalid format: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("AI Analysis - General failure", exc_info=True)
+            return {"error": f"Could not analyse thread: {exc}"}
 
     def generate_experiment_suggestions(self, assumption: str) -> str:
-        """
-        Suggests an experiment method for a given assumption.
-        """
-        prompt = f"Given the assumption: '{assumption}', suggest 3 rapid test methods (e.g., Interviews, Fake Door, Prototype) to validate it within 2 weeks."
+        """Suggest rapid experiments for a given assumption."""
+        prompt = (
+            "You are Evidently, Nesta's Test & Learn assistant. Based on the assumption below, "
+            "return three succinct experiment methods (e.g., Fake Door, Interview, Prototype) "
+            "that could validate or invalidate it within two weeks."
+            f"\nAssumption: {assumption}"
+        )
         try:
-            response = self.model.generate_content(prompt)
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
             return response.text
-        except Exception as e:
-            logging.error(f"Failed to generate experiment suggestions: {e}", exc_info=True)
-            return "Could not generate experiments."
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to generate experiment suggestions", exc_info=True)
+            return "Could not generate experiments right now."
+
+    def recommend_methods(self, stage: str, context: str) -> str:
+        """Recommend Nesta Playbook methods with rationale and case studies."""
+        methods = knowledge_base.get_stage_methods(stage)
+        case_guidance = {m: knowledge_base.get_case_study(m) for m in methods}
+        prompt = f"""
+You are Evidently, Nesta's Test & Learn assistant. Use British English. Recommend methods for the '{stage}' phase.
+Framework stage description: {knowledge_base.get_stage_description(stage)}
+Toolkit: {methods}
+Case studies: {case_guidance}
+Context from user: {context}
+Return a concise explanation of which methods fit, why, and cite the matching case studies.
+"""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            return response.text
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to recommend methods", exc_info=True)
+            return "Unable to recommend methods right now."
