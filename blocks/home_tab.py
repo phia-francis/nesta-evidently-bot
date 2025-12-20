@@ -279,7 +279,7 @@ def _project_canvas_blocks(project_data: dict) -> List[dict]:
                 ring_url = FALLBACK_CHART_URL
 
             text = assumption.get("text", prompt)
-            assumption_id = assumption.get("id", text)
+            assumption_id = assumption.get("id") or text[:75]
             canvas_blocks.append(
                 {
                     "type": "section",
