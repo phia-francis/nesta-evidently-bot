@@ -105,17 +105,37 @@ async def handle_mention(body, say, client, logger):  # noqa: ANN001
         messages = history["messages"]
         full_text = "\n".join([f"{m.get('user')}: {m.get('text')}" for m in messages])
 
-        analysis = await ai_service.analyze_thread_async(full_text)
+        attachments = [
+            {"name": file.get("name"), "mimetype": file.get("mimetype")}
+            for message in messages
+            for file in message.get("files", []) or []
+        ]
+
+        # Use run_in_executor for the synchronous AI service call to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        analysis = await loop.run_in_executor(
+            None, lambda: ai_service.analyze_thread_structured(full_text, attachments)
+        )
 
         stop_animation.set()
         animation_task.cancel()
+
+        if analysis.get("error"):
+            await client.chat_update(
+                channel=channel_id,
+                ts=loading_msg["ts"],
+                blocks=error_block("The AI brain is briefly offline. Please try again."),
+                text="Analysis failed",
+            )
+            return
+
         await client.chat_update(
             channel=channel_id,
             ts=loading_msg["ts"],
             blocks=get_ai_summary_block(analysis),
             text="Analysis complete",
         )
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         logger.error("Error handling mention: %s", exc, exc_info=True)
         stop_animation.set()
         animation_task.cancel()
@@ -124,7 +144,6 @@ async def handle_mention(body, say, client, logger):  # noqa: ANN001
             ts=loading_msg["ts"],
             text=f":warning: I crashed while thinking: {str(exc)}",
         )
-
 
 # --- 3. ACTIVE PERSISTENCE / NUDGES ---
 @app.action("nudge_action")
