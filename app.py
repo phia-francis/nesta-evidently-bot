@@ -40,7 +40,7 @@ def update_home_tab(client, event, logger):
         home_view = get_home_view(user_id, project_data, current_workspace)
         client.views_publish(user_id=user_id, view=home_view)
     except Exception as exc:  # noqa: BLE001
-        logger.error("Error publishing home tab: %s", exc)
+        logger.error("Error publishing home tab: %s", exc, exc_info=True)
 
 
 @app.action("navigate_workspace")
