@@ -205,7 +205,8 @@ async def link_google_doc(ack, body, client, logger):  # noqa: ANN001
             await client.chat_postEphemeral(channel=user_id, user=user_id, text="I couldn't read that document. Check sharing settings.")
             return
 
-        analysis = ai_service.analyze_thread_structured(content)
+        loop = asyncio.get_running_loop()
+        content = await loop.run_in_executor(None, drive_service.get_file_content, file_id)
         if analysis.get("error"):
             await client.chat_postEphemeral(channel=user_id, user=user_id, text="AI could not parse the document.")
             return
