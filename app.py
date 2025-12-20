@@ -287,8 +287,7 @@ def export_slides(ack, body, respond, client, logger):
         if not google_workspace_service:
             respond("Google Workspace is not configured.")
             return
-        user_info = client.users_info(user=user_id)
-        requester_email = user_info["user"]["profile"].get("email")
+        requester_email = _get_user_email(client, user_id, logger)
         project = db_service.get_user_project(user_id)
         slides = [
             f"Opportunity confidence: {project.get('progress_score', 0)}%",
