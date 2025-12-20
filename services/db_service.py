@@ -56,7 +56,7 @@ class ProjectDB:
 
     @staticmethod
     def _calculate_average_confidence(assumptions: List[dict]) -> int:
-        active = [a.get("confidence_score", 0) or a.get("confidence", 0) for a in assumptions if a.get("status") != "archived"]
+        active = [a.get("confidence_score") or a.get("confidence") or 0 for a in assumptions if a.get("status") != "archived"]
         if not active:
             return 0
         return round(sum(active) / len(active))
