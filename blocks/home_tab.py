@@ -184,7 +184,13 @@ def render_experiments_workspace(project_data: dict) -> List[dict]:
             "🟢"
             if current >= target
             else "🟡"
-            if current >= target * _EXPERIMENT_WARN_THRESHOLD
+        status_emoji = (
+            "🟢"
+            if current >= target
+            else "🟡"
+            if current >= target * 0.5
+            else "🔴"
+        )
             else "🔴"
         )
         blocks.append(
