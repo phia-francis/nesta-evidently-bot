@@ -180,7 +180,13 @@ def render_experiments_workspace(project_data: dict) -> List[dict]:
     for exp in experiments:
         current = exp.get("current_metric", 0)
         target = exp.get("target_metric", 0)
-status_emoji = "🟢" if current >= target else "🟡" if current >= target * _EXPERIMENT_WARN_THRESHOLD else "🔴"
+        status_emoji = (
+            "🟢"
+            if current >= target
+            else "🟡"
+            if current >= target * _EXPERIMENT_WARN_THRESHOLD
+            else "🔴"
+        )
         blocks.append(
             {
                 "type": "section",
@@ -229,7 +235,11 @@ def render_team_workspace() -> List[dict]:
 
 
 def _calculate_average_confidence(assumptions: Iterable[dict]) -> int:
-    active_scores = [a.get("confidence_score") or a.get("confidence") or 0 for a in assumptions if a.get("status") != "archived"]
+    active_scores = [
+        a.get("confidence_score") or a.get("confidence") or 0
+        for a in assumptions
+        if a.get("status") != "archived"
+    ]
     if not active_scores:
         return 0
     return round(sum(active_scores) / len(active_scores))
