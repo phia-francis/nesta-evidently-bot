@@ -102,3 +102,47 @@ class ChartService:
             },
         }
         return qc.get_url()
+
+    @staticmethod
+    def generate_decision_heatmap(votes: list[dict]) -> str:
+        """Scatter plot of impact vs uncertainty to reveal consensus visually."""
+        qc = QuickChart()
+        qc.width = 480
+        qc.height = 320
+        qc.version = ChartService._QUICKCHART_VERSION
+
+        points = [{"x": vote.get("impact", 0), "y": vote.get("uncertainty", 0)} for vote in votes] or [
+            {"x": 0, "y": 0}
+        ]
+
+        qc.config = {
+            "type": "scatter",
+            "data": {
+                "datasets": [
+                    {
+                        "label": "Votes",
+                        "data": points,
+                        "backgroundColor": Brand.NESTA_TEAL,
+                    }
+                ]
+            },
+            "options": {
+                "legend": {"display": False},
+                "scales": {
+                    "xAxes": [
+                        {
+                            "scaleLabel": {"display": True, "labelString": "Impact (1-5)"},
+                            "ticks": {"min": 0, "max": 5, "stepSize": 1},
+                        }
+                    ],
+                    "yAxes": [
+                        {
+                            "scaleLabel": {"display": True, "labelString": "Uncertainty (1-5)"},
+                            "ticks": {"min": 0, "max": 5, "stepSize": 1},
+                        }
+                    ],
+                },
+                "title": {"display": True, "text": "Impact vs Uncertainty"},
+            },
+        }
+        return qc.get_url()
