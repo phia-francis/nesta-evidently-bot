@@ -180,7 +180,7 @@ def render_experiments_workspace(project_data: dict) -> List[dict]:
     for exp in experiments:
         current = exp.get("current_metric", 0)
         target = exp.get("target_metric", 0)
-        status_emoji = "🟢" if current >= target else "🟡" if current >= target * 0.8 else "🔴"
+status_emoji = "🟢" if current >= target else "🟡" if current >= target * _EXPERIMENT_WARN_THRESHOLD else "🔴"
         blocks.append(
             {
                 "type": "section",
