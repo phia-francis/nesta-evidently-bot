@@ -27,10 +27,11 @@ class EvidenceAI:
         return _PII_REGEX.sub("[redacted]", text)
 
     @staticmethod
+    @staticmethod
     def _redact_pii(text: str) -> str:
         """Simple regex-based PII redaction before sending to AI."""
         email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
-        phone_pattern = r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b"
+        phone_pattern = r"\b\d{3}[-. ]?\d{3}[-. ]?\d{4}\b"
         text = re.sub(email_pattern, "[EMAIL_REDACTED]", text)
         text = re.sub(phone_pattern, "[PHONE_REDACTED]", text)
         return text
