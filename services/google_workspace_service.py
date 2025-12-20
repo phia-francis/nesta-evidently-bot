@@ -22,6 +22,7 @@ class GoogleWorkspaceService:
     SHEETS_SCOPE = "https://www.googleapis.com/auth/spreadsheets"
     SLIDES_SCOPE = "https://www.googleapis.com/auth/presentations"
     GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+    DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 
     def __init__(self):
         self.creds = self._get_credentials()
@@ -41,16 +42,19 @@ class GoogleWorkspaceService:
             GoogleWorkspaceService.SHEETS_SCOPE,
             GoogleWorkspaceService.SLIDES_SCOPE,
             GoogleWorkspaceService.GMAIL_SCOPE,
+            GoogleWorkspaceService.DRIVE_SCOPE,
         ]
         return service_account.Credentials.from_service_account_info(info, scopes=scopes)
 
-    def create_doc(self, title: str, content: str) -> str | None:
+    def create_doc(self, title: str, content: str, share_email: str | None = None) -> str | None:
         try:
             body = {"title": title}
             document = self.docs_service.documents().create(body=body).execute()
             doc_id = document.get("documentId")
             requests = [{"insertText": {"location": {"index": 1}, "text": content}}]
             self.docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
+            if share_email:
+                self._share_file(doc_id, share_email)
             return f"https://docs.google.com/document/d/{doc_id}/edit"
         except HttpError:
             logger.error("Failed to create Google Doc", exc_info=True)
@@ -79,7 +83,7 @@ class GoogleWorkspaceService:
             logger.error("Unexpected error creating Sheet", exc_info=True)
             return None
 
-    def create_slide_deck(self, title: str, slides_content: List[str]) -> str | None:
+    def create_slide_deck(self, title: str, slides_content: List[str], share_email: str | None = None) -> str | None:
         try:
             presentation = self.slides_service.presentations().create(body={"title": title}).execute()
             presentation_id = presentation.get("presentationId")
@@ -110,6 +114,8 @@ class GoogleWorkspaceService:
                 self.slides_service.presentations().batchUpdate(
                     presentationId=presentation_id, body={"requests": requests}
                 ).execute()
+            if share_email:
+                self._share_file(presentation_id, share_email)
             return f"https://docs.google.com/presentation/d/{presentation_id}/edit"
         except HttpError:
             logger.error("Failed to create slide deck", exc_info=True)
@@ -117,6 +123,25 @@ class GoogleWorkspaceService:
         except Exception:  # noqa: BLE001
             logger.error("Unexpected error creating slides", exc_info=True)
             return None
+
+    def _share_file(self, file_id: str, email: str, role: str = "writer") -> None:
+        try:
+            logger.error("Unexpected error creating slides", exc_info=True)
+            return None
+
+    def _share_file(self, file_id: str, email: str, role: str = "writer") -> None:
+        try:
+            drive_service = self.drive_service
+            drive_service.permissions().create(
+                fileId=file_id,
+                body={"type": "user", "role": role, "emailAddress": email},
+                fields="id",
+                sendNotificationEmail=False,
+            ).execute()
+        except HttpError:
+            logger.error("Failed to share file %s with %s", file_id, email, exc_info=True)
+        except Exception:  # noqa: BLE001
+            logger.error("Unexpected error sharing file %s", file_id, exc_info=True)
 
     def send_email(self, to: str, subject: str, body: str) -> bool:
         try:

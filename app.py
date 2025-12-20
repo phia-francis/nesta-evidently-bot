@@ -280,20 +280,23 @@ def open_case_study(ack, body, client, logger):
 
 # --- 6. GOOGLE WORKSPACE EXPORTS ---
 @app.command("/evidently-export-slides")
-def export_slides(ack, body, respond, logger):
+def export_slides(ack, body, respond, client, logger):
     ack()
     user_id = body.get("user_id")
     try:
         if not google_workspace_service:
             respond("Google Workspace is not configured.")
             return
+        requester_email = _get_user_email(client, user_id, logger)
         project = db_service.get_user_project(user_id)
         slides = [
             f"Opportunity confidence: {project.get('progress_score', 0)}%",
             f"Active assumptions: {len(project.get('assumptions', []))}",
             "Roadmap overview: Now / Next / Later",
         ]
-        link = google_workspace_service.create_slide_deck("OCP Dashboard", slides)
+        link = google_workspace_service.create_slide_deck(
+            "OCP Dashboard", slides, share_email=requester_email
+        )
         if not link:
             respond("I could not create a slide deck just now.")
             return
@@ -304,12 +307,15 @@ def export_slides(ack, body, respond, logger):
 
 
 @app.command("/evidently-draft-plan")
-def draft_plan(ack, body, respond, logger):
+def draft_plan(ack, body, respond, client, logger):
     ack()
+    user_id = body.get("user_id")
     try:
         if not google_workspace_service:
             respond("Google Workspace is not configured.")
             return
+        user_info = client.users_info(user=user_id)
+        requester_email = user_info["user"]["profile"].get("email")
         context = body.get("text", "").strip()
         plan_content = (
             f"# Project Plan\nContext: {context or 'No extra context provided.'}\n\n"
@@ -317,7 +323,9 @@ def draft_plan(ack, body, respond, logger):
                 [f"## {stage.title()}\n{desc}" for stage, desc in knowledge_base.FRAMEWORK_STAGES.items()]
             )
         )
-        link = google_workspace_service.create_doc("Project Plan", plan_content)
+        link = google_workspace_service.create_doc(
+            "Project Plan", plan_content, share_email=requester_email
+        )
         if not link:
             respond("I couldn't draft the plan right now.")
             return
