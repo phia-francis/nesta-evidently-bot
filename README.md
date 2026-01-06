@@ -113,7 +113,14 @@ This project takes security seriously:
 
 * **PII Redaction:** All text sent to the AI model is scrubbed of emails and phone numbers.
 * **Least Privilege:** Google Drive access is scoped to read-only where possible.
-* See [SECURITY.md](https://www.google.com/search?q=GUIDELINES/SECURITY.md) for full policy.
+* See [SECURITY.md](SECURITY.md) for full policy.
+* For Nesta Group policy requirements (GenAI, data protection, cloud, incident response, web scraping), see [POLICIES.md](POLICIES.md).
+
+## 🧭 Generative AI Policy Compliance (Nesta Group)
+
+This project must be used in line with the Nesta Group Generative AI Policy. Key requirements include using approved tools like Google Gemini and protecting sensitive data.
+
+For the full policy, see the [Generative AI Policy in POLICIES.md](POLICIES.md#1-generative-ai-policy-nesta-group).
 
 ## 🤝 Contributing
 
@@ -121,4 +128,4 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for our coding standards and pull 
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=GUIDELINES/LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
