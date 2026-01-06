@@ -109,15 +109,9 @@ To maintain a production-ready codebase, please adhere to the following architec
 
 ## Generative AI Policy Compliance (Nesta Group)
 
-When contributing to or operating this project, you must follow the Nesta Group Generative AI Policy:
+When contributing to or operating this project, you must follow the Nesta Group Generative AI Policy. Key requirements include using approved tools and protecting sensitive data.
 
-* **Use Gemini by default** for business purposes.
-* **Do not use other GenAI tools** unless approved by your line manager and the Technology team.
-* **Never input personal data or confidential information** into unapproved GenAI tools.
-* **Document risk assessments**, check contractual requirements, be transparent about GenAI usage, and ensure human review.
-* **Complete a DPIA** if Gemini is used to process personal data.
-
-Questions about the policy should be directed to the Applied Research & Innovation Director.
+For full details, please refer to the [Generative AI Policy in POLICIES.md](POLICIES.md#1-generative-ai-policy-nesta-group).
 
 ## Additional Nesta Group Policies
 
