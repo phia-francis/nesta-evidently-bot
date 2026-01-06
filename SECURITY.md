@@ -2,6 +2,23 @@
 
 The **Nesta Evidently Bot** processes internal communication data and interfaces with external AI services (Google Gemini) and cloud databases (Supabase). Ensuring the privacy and security of this data is our top priority.
 
+## Nesta Group Generative AI Policy Compliance
+
+Use of GenAI in this project must follow the Nesta Group Generative AI Policy:
+
+* **Default tool:** Google Gemini is the approved default GenAI tool for business use.
+* **Approved exceptions only:** Any non-Gemini GenAI tool requires approval from your line manager and the Technology team.
+* **No sensitive input to unapproved tools:** Personal data and confidential information must not be entered into unapproved GenAI tools.
+* **Responsible use:** Document risk assessments, check contractual requirements, be transparent about GenAI use, and ensure human review/judgment.
+* **DPIA requirement:** If Gemini processes personal data, complete a DPIA before use.
+* **Policy updates:** Review the latest policy regularly as it may change.
+
+Questions about the policy should be directed to the Applied Research & Innovation Director.
+
+## Other Nesta Group Policies
+
+This repository must also comply with Nesta Group policies on data protection, security incident management, cloud services, software development standards, and web scraping. See [POLICIES.md](POLICIES.md) for the consolidated summary and escalation points.
+
 ## Supported Versions
 
 We currently support security updates for the latest version of the main branch.

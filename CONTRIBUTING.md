@@ -107,6 +107,22 @@ To maintain a production-ready codebase, please adhere to the following architec
 3. **Secrets**: **NEVER** commit your `.env` file or any hardcoded API keys. Double-check your diff before pushing.
 4. **Description**: Clearly describe the problem you are solving and how you tested the solution.
 
+## Generative AI Policy Compliance (Nesta Group)
+
+When contributing to or operating this project, you must follow the Nesta Group Generative AI Policy:
+
+* **Use Gemini by default** for business purposes.
+* **Do not use other GenAI tools** unless approved by your line manager and the Technology team.
+* **Never input personal data or confidential information** into unapproved GenAI tools.
+* **Document risk assessments**, check contractual requirements, be transparent about GenAI usage, and ensure human review.
+* **Complete a DPIA** if Gemini is used to process personal data.
+
+Questions about the policy should be directed to the Applied Research & Innovation Director.
+
+## Additional Nesta Group Policies
+
+This project must also comply with Nesta Group policies on data protection, security incident management, cloud services, software development standards, and web scraping. See [POLICIES.md](POLICIES.md) for the consolidated summary.
+
 ## Code of Conduct
 
-Please note that this project is released with a [Contributor Code of Conduct](https://www.google.com/search?q=GUIDELINES/CODE_OF_CONDUCT.md). By participating in this project you agree to abide by its terms.
+Please note that this project is released with a [Contributor Code of Conduct](CODE_OF_CONDUCT.md). By participating in this project you agree to abide by its terms.

@@ -113,7 +113,21 @@ This project takes security seriously:
 
 * **PII Redaction:** All text sent to the AI model is scrubbed of emails and phone numbers.
 * **Least Privilege:** Google Drive access is scoped to read-only where possible.
-* See [SECURITY.md](https://www.google.com/search?q=GUIDELINES/SECURITY.md) for full policy.
+* See [SECURITY.md](SECURITY.md) for full policy.
+* For Nesta Group policy requirements (GenAI, data protection, cloud, incident response, web scraping), see [POLICIES.md](POLICIES.md).
+
+## 🧭 Generative AI Policy Compliance (Nesta Group)
+
+This project must be used in line with the Nesta Group Generative AI Policy:
+
+* **Default tool:** Google Gemini is the approved default GenAI tool for business use.
+* **Exceptions require approval:** Any non-Gemini GenAI tool requires approval from your line manager and the Technology team.
+* **No sensitive input to unapproved tools:** Personal data and confidential information must **not** be entered into unapproved GenAI tools.
+* **Responsible use obligations:** Users must apply good judgment, document risk assessments, check contractual requirements, be transparent about GenAI use, and ensure human review and judgment.
+* **DPIA required for personal data:** If Gemini processes personal data, complete a Data Protection Impact Assessment (DPIA) before use.
+* **Policy updates:** This policy may change; review the latest version regularly.
+
+Questions about the policy should be directed to the Applied Research & Innovation Director.
 
 ## 🤝 Contributing
 
@@ -121,4 +135,4 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) for our coding standards and pull 
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](https://www.google.com/search?q=GUIDELINES/LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
