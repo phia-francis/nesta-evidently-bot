@@ -117,7 +117,7 @@ This project takes security seriously:
 
 ## 🤝 Contributing
 
-Please see [CONTRIBUTING.md](https://www.google.com/search?q=GUIDELINES/CONTRIBUTING.md) for our coding standards and pull request process.
+Please see [CONTRIBUTING.md](CONTRIBUTING.md) for our coding standards and pull request process.
 
 ## 📄 License
 
