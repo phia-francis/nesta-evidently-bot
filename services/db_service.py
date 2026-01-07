@@ -106,7 +106,7 @@ class ProjectDB:
                 project.drive_file_id = file_id
                 db.commit()
 
-    def update_assumption_status(self, assumption_id: int, status: str):
+    def update_assumption_status(self, assumption_id: str, status: str):
         with SessionLocal() as db:
             # Handle potential string input from UI
             try:
