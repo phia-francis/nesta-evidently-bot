@@ -10,8 +10,8 @@ class Config:
     SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
     SLACK_APP_TOKEN = os.environ["SLACK_APP_TOKEN"]
     GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
-    SUPABASE_URL = os.environ.get("SUPABASE_URL")
-    SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
+    # NEW: Standard Database URL
+    DATABASE_URL = os.environ["DATABASE_URL"]
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
 
     # Thresholds
