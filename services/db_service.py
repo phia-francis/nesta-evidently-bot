@@ -105,7 +105,31 @@ class ProjectDB:
             if project:
                 project.drive_file_id = file_id
                 db.commit()
+                
+    def save_assumptions(self, user_id: str, assumptions: List[Dict[str, Any]]):
+        """Saves a list of assumptions, replacing existing ones for the user."""
+        with SessionLocal() as db:
+            project = db.query(Project).options(joinedload(Project.assumptions)).filter(Project.user_id == user_id).first()
+            if not project:
+                project = Project(user_id=user_id)
+                db.add(project)
+                db.flush()
 
+            project.assumptions.clear()
+            new_assumption_objects = [
+                Assumption(
+                    project_id=project.id,
+                    text=ass_data.get("text"),
+                    category=ass_data.get("category"),
+                    confidence_score=ass_data.get("confidence_score") or ass_data.get("confidence", 0),
+                    status=ass_data.get("status", "active"),
+                ) for ass_data in assumptions
+            ]
+            project.assumptions.extend(new_assumption_objects)
+            project.progress_score = self._calculate_average_confidence(assumptions)
+
+            db.commit()
+    
     def update_assumption_status(self, assumption_id: str, status: str):
         with SessionLocal() as db:
             # Handle potential string input from UI
