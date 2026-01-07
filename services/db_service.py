@@ -93,7 +93,7 @@ class ProjectDB:
     def set_current_view(self, user_id: str, workspace: str):
         """Persist workspace navigation state."""
         with SessionLocal() as db:
-            project = db.query(Project).filter(Project.user_id == user_id).first()
+            project = self._get_project_by_user_id(db, user_id)
             if project:
                 project.current_view = workspace
                 db.commit()
