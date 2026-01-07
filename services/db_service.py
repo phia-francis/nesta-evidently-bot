@@ -52,7 +52,7 @@ class ProjectDB:
     def get_user_project(self, user_id: str) -> Dict[str, Any]:
         """Fetch a project + assumptions for a user, matching old API structure."""
         with SessionLocal() as db:
-            project = db.query(Project).filter(Project.user_id == user_id).first()
+            project = db.query(Project).options(joinedload(Project.assumptions)).filter(Project.user_id == user_id).first()
             
             if not project:
                 project = Project(user_id=user_id)
