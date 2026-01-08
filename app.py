@@ -219,13 +219,13 @@ async def link_google_doc(ack, body, client, logger):  # noqa: ANN001
         db_service.link_drive_file(user_id, file_id)
         await client.chat_postEphemeral(channel=user_id, user=user_id, text="🔗 Linked document. Starting first sync...")
 
-        content = drive_service.get_file_content(file_id)
+        loop = asyncio.get_running_loop()
+        content = await loop.run_in_executor(None, drive_service.get_file_content, file_id)
         if not content:
             await client.chat_postEphemeral(channel=user_id, user=user_id, text="I couldn't read that document. Check sharing settings.")
             return
 
-        loop = asyncio.get_running_loop()
-        content = await loop.run_in_executor(None, drive_service.get_file_content, file_id)
+        analysis = await loop.run_in_executor(None, lambda: ai_service.analyze_thread_structured(content))
         if analysis.get("error"):
             await client.chat_postEphemeral(channel=user_id, user=user_id, text="AI could not parse the document.")
             return
@@ -253,12 +253,13 @@ async def handle_sync(ack, body, client, logger):  # noqa: ANN001
             return
 
         await client.chat_postMessage(channel=user_id, text="🔄 Syncing with Google Drive... reading your assumption log.")
-        doc_text = drive_service.get_file_content(file_id)
+        loop = asyncio.get_running_loop()
+        doc_text = await loop.run_in_executor(None, drive_service.get_file_content, file_id)
         if not doc_text:
             await client.chat_postMessage(channel=user_id, text="⚠️ I couldn't access the file. Did you share it with me?")
             return
 
-        analysis = ai_service.analyze_thread_structured(doc_text)
+        analysis = await loop.run_in_executor(None, lambda: ai_service.analyze_thread_structured(doc_text))
         if analysis.get("error"):
             await client.chat_postMessage(channel=user_id, text="❌ Sync failed while parsing the document.")
             return
@@ -447,5 +448,8 @@ async def draft_plan(ack, body, respond, logger):  # noqa: ANN001
 
 # --- 8. START ---
 if __name__ == "__main__":
-    handler = AsyncSocketModeHandler(app, Config.SLACK_APP_TOKEN)
-    asyncio.run(handler.start_async())
+    async def main() -> None:
+        handler = AsyncSocketModeHandler(app, Config.SLACK_APP_TOKEN)
+        await handler.start_async()
+
+    asyncio.run(main())
