@@ -10,3 +10,4 @@ google-auth-oauthlib
 quickchart.io
 psycopg2-binary==2.9.9
 SQLAlchemy==2.0.25
+aiohttp
