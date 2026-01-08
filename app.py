@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 
 from aiohttp import web
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
@@ -55,7 +56,7 @@ async def update_home_tab(client, event, logger):  # noqa: ANN001
         logger.error("Error publishing home tab: %s", exc, exc_info=True)
 
 
-@app.action("navigate_workspace")
+@app.action(re.compile(r"^navigate_workspace_.*"))
 async def handle_navigation(ack, body, client, logger):  # noqa: ANN001
     await ack()
     user_id = body["user"]["id"]
