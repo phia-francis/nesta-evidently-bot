@@ -24,7 +24,7 @@ def _navigation_block(current_workspace: str) -> dict:
         button: dict = {
             "type": "button",
             "text": {"type": "plain_text", "text": label},
-            "action_id": "navigate_workspace",
+            "action_id": f"navigate_workspace_{workspace}",
             "value": workspace,
         }
         if workspace == current_workspace:
