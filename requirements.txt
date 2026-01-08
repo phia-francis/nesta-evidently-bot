@@ -8,6 +8,6 @@ google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
 quickchart.io
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.10
 SQLAlchemy>=2.0.36
 aiohttp
