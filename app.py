@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
 from blocks.home_tab import get_home_view
