@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
 from blocks.home_tab import get_home_view
@@ -447,5 +447,5 @@ async def draft_plan(ack, body, respond, logger):  # noqa: ANN001
 
 # --- 8. START ---
 if __name__ == "__main__":
-    handler = AsyncSocketModeHandler(app, Config.SLACK_APP_TOKEN)
-    asyncio.run(handler.start_async())
+    handler = SocketModeHandler(app, Config.SLACK_APP_TOKEN)
+    handler.start()
