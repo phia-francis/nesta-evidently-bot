@@ -447,5 +447,5 @@ async def draft_plan(ack, body, respond, logger):  # noqa: ANN001
 
 # --- 8. START ---
 if __name__ == "__main__":
-    handler = SocketModeHandler(app, Config.SLACK_APP_TOKEN)
-    handler.start()
+    handler = AsyncSocketModeHandler(app, Config.SLACK_APP_TOKEN)
+    asyncio.run(handler.start_async())
