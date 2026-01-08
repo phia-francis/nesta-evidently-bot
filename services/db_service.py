@@ -1,12 +1,25 @@
 import logging
 import datetime as dt
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, Enum, Float, JSON
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship, joinedload
 from config import Config
 
 # 1. Setup Database Connection
-engine = create_engine(Config.DATABASE_URL)
+def _build_engine():
+    url = make_url(Config.DATABASE_URL)
+    connect_args = {}
+
+    if url.drivername.startswith("postgresql") or url.drivername == "postgres":
+        url = url.set(drivername="postgresql+psycopg2")
+        if not url.query.get("sslmode"):
+            connect_args["sslmode"] = "require"
+
+    return create_engine(url, connect_args=connect_args, pool_pre_ping=True)
+
+
+engine = _build_engine()
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
