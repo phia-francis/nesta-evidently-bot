@@ -13,6 +13,7 @@ class Config:
     # NEW: Standard Database URL
     DATABASE_URL = os.environ["DATABASE_URL"]
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    PORT = int(os.environ.get("PORT", 10000))
 
     # Thresholds
     CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", 0.8))

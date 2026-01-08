@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from aiohttp import web
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 
@@ -448,8 +449,30 @@ async def draft_plan(ack, body, respond, logger):  # noqa: ANN001
 
 # --- 8. START ---
 if __name__ == "__main__":
-    async def main() -> None:
+    async def run_socket_mode() -> None:
         handler = AsyncSocketModeHandler(app, Config.SLACK_APP_TOKEN)
         await handler.start_async()
+
+    async def run_health_server() -> None:
+        health_app = web.Application()
+
+        async def health_check(request: web.Request) -> web.Response:
+            return web.json_response({"status": "ok"})
+
+        health_app.router.add_get("/", health_check)
+        health_app.router.add_get("/healthz", health_check)
+
+        runner = web.AppRunner(health_app)
+        await runner.setup()
+        site = web.TCPSite(runner, host="0.0.0.0", port=Config.PORT)
+        await site.start()
+        logger.info("Health server listening on port %s", Config.PORT)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await runner.cleanup()
+
+    async def main() -> None:
+        await asyncio.gather(run_socket_mode(), run_health_server())
 
     asyncio.run(main())
