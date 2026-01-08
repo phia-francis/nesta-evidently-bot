@@ -65,13 +65,10 @@ class ProjectDB:
     def get_user_project(self, user_id: str) -> Dict[str, Any]:
         """Fetch a project + assumptions for a user, matching old API structure."""
         with SessionLocal() as db:
-            project = db.query(Project).options(joinedload(Project.assumptions)).filter(Project.user_id == user_id).first()
-            
-            if not project:
-                project = Project(user_id=user_id)
-                db.add(project)
-                db.commit()
-                db.refresh(project)
+            project = self._get_project_by_user_id(db, user_id)
+            project = db.query(Project).options(joinedload(Project.assumptions)).filter(Project.id == project.id).first()
+            db.commit()
+            db.refresh(project)
             
             # Reconstruct the dictionary structure expected by app.py
             return {
@@ -122,11 +119,8 @@ class ProjectDB:
     def save_assumptions(self, user_id: str, assumptions: List[Dict[str, Any]]):
         """Saves a list of assumptions, replacing existing ones for the user."""
         with SessionLocal() as db:
-            project = db.query(Project).options(joinedload(Project.assumptions)).filter(Project.user_id == user_id).first()
-            if not project:
-                project = Project(user_id=user_id)
-                db.add(project)
-                db.flush()
+            project = self._get_project_by_user_id(db, user_id)
+            project = db.query(Project).options(joinedload(Project.assumptions)).filter(Project.id == project.id).first()
 
             project.assumptions.clear()
             new_assumption_objects = [

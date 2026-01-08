@@ -1,6 +1,7 @@
 import logging
 import re
 import threading
+import time
 
 from aiohttp import web
 from slack_bolt import App
@@ -78,42 +79,70 @@ def handle_mention(body, say, client, logger):  # noqa: ANN001
     channel_id = event["channel"]
 
     loading_msg = say(blocks=get_loading_block("Analysing thread context..."), thread_ts=thread_ts)
+    stop_animation = threading.Event()
 
-    try:
-        history = client.conversations_replies(channel=channel_id, ts=thread_ts)
-        messages = history["messages"]
-        full_text = "\n".join([f"{m.get('user')}: {m.get('text')}" for m in messages])
-
-        attachments = [
-            {"name": file.get("name"), "mimetype": file.get("mimetype")}
-            for message in messages
-            for file in message.get("files", []) or []
+    def animate_loading() -> None:
+        statuses = [
+            "Reading thread history... 📖",
+            "Extracting hypotheses... 🧠",
+            "Drafting summary... 📝",
         ]
+        index = 0
+        while not stop_animation.is_set():
+            time.sleep(1.5)
+            index = (index + 1) % len(statuses)
+            try:
+                client.chat_update(
+                    channel=channel_id,
+                    ts=loading_msg["ts"],
+                    blocks=get_loading_block(statuses[index]),
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("Unable to update loading animation", exc_info=True)
 
-        analysis = ai_service.analyze_thread_structured(full_text, attachments)
+    def run_analysis() -> None:
+        try:
+            history = client.conversations_replies(channel=channel_id, ts=thread_ts)
+            messages = history["messages"]
+            full_text = "\n".join([f"{m.get('user')}: {m.get('text')}" for m in messages])
 
-        if analysis.get("error"):
+            attachments = [
+                {"name": file.get("name"), "mimetype": file.get("mimetype")}
+                for message in messages
+                for file in message.get("files", []) or []
+            ]
+
+            analysis = ai_service.analyze_thread_structured(full_text, attachments)
+
+            if analysis.get("error"):
+                client.chat_update(
+                    channel=channel_id,
+                    ts=loading_msg["ts"],
+                    blocks=error_block("The AI brain is briefly offline. Please try again."),
+                    text="Analysis failed",
+                )
+                return
+
             client.chat_update(
                 channel=channel_id,
                 ts=loading_msg["ts"],
-                blocks=error_block("The AI brain is briefly offline. Please try again."),
-                text="Analysis failed",
+                blocks=get_ai_summary_block(analysis),
+                text="Analysis complete",
             )
-            return
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error handling mention: %s", exc, exc_info=True)
+            client.chat_update(
+                channel=channel_id,
+                ts=loading_msg["ts"],
+                text=f":warning: I crashed while thinking: {str(exc)}",
+            )
+        finally:
+            stop_animation.set()
 
-        client.chat_update(
-            channel=channel_id,
-            ts=loading_msg["ts"],
-            blocks=get_ai_summary_block(analysis),
-            text="Analysis complete",
-        )
-    except Exception as exc:
-        logger.error("Error handling mention: %s", exc, exc_info=True)
-        client.chat_update(
-            channel=channel_id,
-            ts=loading_msg["ts"],
-            text=f":warning: I crashed while thinking: {str(exc)}",
-        )
+    animation_thread = threading.Thread(target=animate_loading, daemon=True)
+    analysis_thread = threading.Thread(target=run_analysis, daemon=True)
+    animation_thread.start()
+    analysis_thread.start()
 
 # --- 3. ACTIVE PERSISTENCE / NUDGES ---
 @app.action("nudge_action")
