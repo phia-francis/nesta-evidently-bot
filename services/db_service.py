@@ -188,3 +188,11 @@ class ProjectDB:
         if not active_scores:
             return 0
         return round(sum(active_scores) / len(active_scores))
+
+    def _get_project_by_user_id(self, db, user_id: str) -> Project:
+        project = db.query(Project).filter(Project.user_id == user_id).first()
+        if not project:
+            project = Project(user_id=user_id)
+            db.add(project)
+            db.flush()
+        return project
