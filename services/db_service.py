@@ -9,12 +9,12 @@ from config import Config
 # 1. Setup Database Connection
 def _build_engine():
     url = make_url(Config.DATABASE_URL)
-    if url.drivername in {"postgres", "postgresql"}:
-        url = url.set(drivername="postgresql+psycopg2")
-
     connect_args = {}
-    if url.drivername.startswith("postgresql") and not url.query.get("sslmode"):
-        connect_args["sslmode"] = "require"
+
+    if url.drivername.startswith("postgresql") or url.drivername == "postgres":
+        url = url.set(drivername="postgresql+psycopg2")
+        if not url.query.get("sslmode"):
+            connect_args["sslmode"] = "require"
 
     return create_engine(url, connect_args=connect_args, pool_pre_ping=True)
 
