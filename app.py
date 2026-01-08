@@ -456,7 +456,7 @@ if __name__ == "__main__":
     async def run_health_server() -> None:
         health_app = web.Application()
 
-        async def health_check(request):  # noqa: ANN001
+        async def health_check(request: web.Request) -> web.Response:
             return web.json_response({"status": "ok"})
 
         health_app.router.add_get("/", health_check)
