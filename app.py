@@ -467,7 +467,10 @@ if __name__ == "__main__":
         site = web.TCPSite(runner, host="0.0.0.0", port=Config.PORT)
         await site.start()
         logger.info("Health server listening on port %s", Config.PORT)
-        await asyncio.Event().wait()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await runner.cleanup()
 
     async def main() -> None:
         await asyncio.gather(run_socket_mode(), run_health_server())
