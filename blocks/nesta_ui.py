@@ -23,7 +23,7 @@ class NestaUI:
     def tip_panel(text: str) -> dict:
         return ContextBlock(
             elements=[
-                ImageBlock(image_url="https://emojicdn.elk.sh/💡", alt_text="idea").to_dict(),
+                {"type": "mrkdwn", "text": ":bulb:"},
                 {"type": "mrkdwn", "text": f"*Nesta Tip:* {text}"},
             ]
         ).to_dict()
