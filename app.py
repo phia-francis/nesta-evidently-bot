@@ -609,7 +609,7 @@ if __name__ == "__main__":
 
         health_app.router.add_get("/", health_check)
         health_app.router.add_get("/healthz", health_check)
-        web.run_app(health_app, host="0.0.0.0", port=Config.PORT, print=None)
+        web.run_app(health_app, host="0.0.0.0", port=Config.PORT, print=None, handle_signals=False)
 
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
