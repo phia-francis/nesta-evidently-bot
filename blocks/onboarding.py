@@ -1,4 +1,6 @@
-from slack_sdk.models.blocks import InputBlock, Option, PlainTextInputElement, RadioButtonsElement
+from slack_sdk.models.blocks import InputBlock
+from slack_sdk.models.blocks.block_elements import PlainTextInputElement, RadioButtonsElement
+from slack_sdk.models.objects import Option
 
 from blocks.nesta_ui import NestaUI
 
