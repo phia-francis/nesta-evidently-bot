@@ -1,6 +1,19 @@
-from slack_sdk.models.blocks import InputBlock, Option, PlainTextInputElement, RadioButtonsElement
+from enum import Enum
+
+from slack_sdk.models.blocks import InputBlock, Option, PlainTextObject
+from slack_sdk.models.blocks.block_elements import PlainTextInputElement, RadioButtonsElement
 
 from blocks.nesta_ui import NestaUI
+
+
+class ProjectPhase(Enum):
+    DISCOVERY = ("Discovery (Understanding needs)", "Discovery")
+    ALPHA = ("Alpha (Testing solutions)", "Alpha")
+    BETA = ("Beta (Scaling)", "Beta")
+
+    def __init__(self, display_text: str, value: str) -> None:
+        self.display_text = display_text
+        self.value = value
 
 
 def get_onboarding_welcome() -> dict:
@@ -74,12 +87,8 @@ def get_setup_step_2_modal(problem_statement: str) -> dict:
                 element=RadioButtonsElement(
                     action_id="phase_input",
                     options=[
-                        Option(
-                            text={"type": "plain_text", "text": "Discovery (Understanding needs)"},
-                            value="Discovery",
-                        ),
-                        Option(text={"type": "plain_text", "text": "Alpha (Testing solutions)"}, value="Alpha"),
-                        Option(text={"type": "plain_text", "text": "Beta (Scaling)"}, value="Beta"),
+                        Option(text=PlainTextObject(text=phase.display_text), value=phase.value)
+                        for phase in ProjectPhase
                     ],
                 ),
             ).to_dict(),
