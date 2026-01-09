@@ -11,9 +11,11 @@ class ProjectPhase(Enum):
     ALPHA = ("Alpha (Testing solutions)", "Alpha")
     BETA = ("Beta (Scaling)", "Beta")
 
-    def __init__(self, display_text: str, value: str) -> None:
-        self.display_text = display_text
-        self.value = value
+    def __new__(cls, display_text: str, value: str) -> "ProjectPhase":
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj.display_text = display_text
+        return obj
 
 
 def get_onboarding_welcome() -> dict:
