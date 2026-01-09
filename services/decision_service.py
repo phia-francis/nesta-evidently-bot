@@ -1,63 +1,92 @@
-import time
-import uuid
+from slack_sdk.models.blocks import ActionsBlock, Button, HeaderBlock, SectionBlock
+
+from services.db_service import DbService
 
 
-class DecisionRoom:
-    def __init__(self):
-        # In-memory storage; swap for persistent cache in production.
-        self.sessions: dict[str, dict] = {}
-        self._latest_session_by_channel: dict[str, str] = {}
+class DecisionRoomService:
+    def __init__(self, db_service: DbService):
+        self.db = db_service
 
-    def create_session(self, channel_id: str, topic: str) -> str:
-        session_id = str(uuid.uuid4())
-        self.sessions[session_id] = {
-            "topic": topic,
-            "channel": channel_id,
-            "status": "voting",
-            "votes": {},
-            "created_at": time.time(),
-        }
-        self._latest_session_by_channel[channel_id] = session_id
-        return session_id
+    def start_session(self, client, channel_id: str, user_id: str):
+        project = self.db.get_active_project(user_id)
+        if not project:
+            return False, "You need to select a project in the Home Tab first."
 
-    def get_active_session(self, channel_id: str) -> str | None:
-        session_id = self._latest_session_by_channel.get(channel_id)
-        session = self.sessions.get(session_id) if session_id else None
-        if session and session.get("status") == "voting":
-            return session_id
-        return None
+        session_id = self.db.create_decision_session(project["id"], channel_id)
 
-    def cast_vote(self, session_id: str, user_id: str, impact: int, uncertainty: int) -> bool:
-        session = self.sessions.get(session_id)
-        if not session:
-            return False
-        session["votes"][user_id] = {"impact": impact, "uncertainty": uncertainty}
-        return True
-
-    def get_votes(self, session_id: str) -> list[dict]:
-        session = self.sessions.get(session_id)
-        if not session:
-            return []
-        return [
-            {"user_id": user, "impact": vote.get("impact", 0), "uncertainty": vote.get("uncertainty", 0)}
-            for user, vote in session.get("votes", {}).items()
+        assumptions = [
+            assumption
+            for assumption in project.get("assumptions", [])
+            if assumption.get("status") in ["suggested", "prioritized"]
         ]
 
-    def reveal_votes(self, session_id: str) -> dict | None:
-        session = self.sessions.get(session_id)
-        if not session:
-            return None
+        if not assumptions:
+            return False, "No pending assumptions to vote on! Add some first."
 
-        votes = session["votes"].values()
-        if not votes:
-            return {"avg_impact": 0, "avg_uncertainty": 0, "count": 0}
+        blocks = [
+            HeaderBlock(text=f"🗳️ Decision Room: {project['name']}").to_dict(),
+            SectionBlock(text="*Team Alignment Time!* Vote on which assumptions we should test next.").to_dict(),
+            {"type": "divider"},
+        ]
 
-        avg_imp = sum(v["impact"] for v in votes) / len(votes)
-        avg_unc = sum(v["uncertainty"] for v in votes) / len(votes)
+        for assumption in assumptions:
+            blocks.append(
+                SectionBlock(
+                    text=(
+                        f"*{assumption['title']}* \n_{assumption['category']}_ "
+                        f"| Confidence: {assumption['confidence_score']}%"
+                    )
+                ).to_dict()
+            )
+            blocks.append(
+                ActionsBlock(
+                    elements=[
+                        Button(
+                            text="✅ Test This",
+                            value=f"{session_id}:{assumption['id']}:keep",
+                            action_id="vote_keep",
+                            style="primary",
+                        ),
+                        Button(
+                            text="⚠️ Pivot",
+                            value=f"{session_id}:{assumption['id']}:pivot",
+                            action_id="vote_pivot",
+                        ),
+                        Button(
+                            text="🗑️ Kill",
+                            value=f"{session_id}:{assumption['id']}:kill",
+                            action_id="vote_kill",
+                            style="danger",
+                        ),
+                    ]
+                ).to_dict()
+            )
+            blocks.append({"type": "divider"})
 
-        session["status"] = "revealed"
-        return {
-            "avg_impact": round(avg_imp, 1),
-            "avg_uncertainty": round(avg_unc, 1),
-            "count": len(votes),
-        }
+        blocks.append(
+            ActionsBlock(
+                elements=[
+                    Button(
+                        text="🏁 End Session & Tally",
+                        value=str(session_id),
+                        action_id="end_decision_session",
+                        style="primary",
+                    )
+                ]
+            ).to_dict()
+        )
+
+        client.chat_postMessage(channel=channel_id, blocks=blocks, text="Decision Room Opened")
+        return True, "Session Started"
+
+    def handle_vote(self, body, client):
+        user_id = body["user"]["id"]
+        session_id, assumption_id, vote_type = body["actions"][0]["value"].split(":")
+
+        self.db.cast_vote(int(session_id), int(assumption_id), user_id, vote_type)
+
+        client.chat_postEphemeral(
+            channel=body["channel"]["id"],
+            user=user_id,
+            text=f"Vote cast: {vote_type.upper()} for assumption {assumption_id}",
+        )

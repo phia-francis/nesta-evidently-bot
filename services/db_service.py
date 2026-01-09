@@ -1,192 +1,287 @@
-import logging
 import datetime as dt
-from typing import List, Dict, Any
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, Enum, Float, JSON
-from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship, joinedload
+from typing import Any, Dict, Optional
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine
+from sqlalchemy.orm import declarative_base, joinedload, relationship, sessionmaker
+
 from config import Config
 
-# 1. Setup Database Connection
-def _build_engine():
-    url = make_url(Config.DATABASE_URL)
-    connect_args = {}
-
-    if url.drivername.startswith("postgresql") or url.drivername == "postgres":
-        url = url.set(drivername="postgresql+psycopg2")
-        if not url.query.get("sslmode"):
-            connect_args["sslmode"] = "require"
-
-    return create_engine(url, connect_args=connect_args, pool_pre_ping=True)
-
-
-engine = _build_engine()
+# 1. Setup Database
+engine = create_engine(Config.DATABASE_URL)
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
 
-# 2. Define Tables (Schema)
+
+# --- 1. CORE ENTITIES (Aligned with React types.ts) ---
+
+
 class Project(Base):
     __tablename__ = "projects"
-    
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String(255), unique=True, index=True)  # Added length
-    name = Column(String(255), default="Evidence Backlog")
-    phase = Column(String(50), default="Discovery")         # Restored field
-    progress_score = Column(Integer, default=0)             # Restored field
-    drive_file_id = Column(String(255), nullable=True)      # Restored field
-    current_view = Column(String(50), default="overview")   # To persist UI state
-    
-    # Store complex structures as JSON for MVP simplicity
-    experiments = Column(JSON, default=list)
-    ai_suggestions = Column(JSON, default=list)
-    roadmap = Column(JSON, default=lambda: {"now": [], "next": [], "later": []})
-    team = Column(JSON, default=dict)
+    name = Column(String(255))
+    description = Column(Text, nullable=True)
+    status = Column(String(50), default="active")
+    created_by = Column(String(255))
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    phase = Column(String(50), default="Discovery")
 
+    # Innovation Health Metrics
+    innovation_score = Column(Integer, default=0)
+    velocity = Column(Integer, default=0)
+
+    members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
     assumptions = relationship("Assumption", back_populates="project", cascade="all, delete-orphan")
+    experiments = relationship("Experiment", back_populates="project", cascade="all, delete-orphan")
+    decisions = relationship("DecisionSession", back_populates="project")
+
+
+class ProjectMember(Base):
+    __tablename__ = "project_members"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    user_id = Column(String(255), index=True)
+    role = Column(String(50), default="member")
+    project = relationship("Project", back_populates="members")
+
 
 class Assumption(Base):
     __tablename__ = "assumptions"
-    
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
-    text = Column(Text)
-    category = Column(String(100), nullable=True)           # Restored field
-    confidence_score = Column(Integer, default=0)           # Restored field
-    status = Column(Enum("active", "archived", "stale", name="assumption_status_enum"), default="active")
-    last_checked = Column(DateTime, default=dt.datetime.utcnow)
-    last_verified_at = Column(DateTime, nullable=True)
-    
-    project = relationship("Project", back_populates="assumptions")
 
-# 3. Create Tables
-# Note: In production, use Alembic for migrations instead of create_all
+    # Core Content
+    title = Column(String(255))
+    description = Column(Text, nullable=True)
+
+    # The "Evidently" Taxonomy
+    category = Column(String(50))
+    status = Column(String(50), default="suggested")
+    lane = Column(String(50), default="backlog")
+
+    # Scoring (0-100)
+    confidence_score = Column(Integer, default=0)
+    evidence_score = Column(Integer, default=0)
+    impact_score = Column(Integer, default=0)
+
+    # Metadata
+    provenance = Column(JSON, default=list)
+    tags = Column(JSON, default=list)
+
+    project = relationship("Project", back_populates="assumptions")
+    experiments = relationship("Experiment", back_populates="assumption")
+    votes = relationship("DecisionVote", back_populates="assumption")
+
+
+class Experiment(Base):
+    __tablename__ = "experiments"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    assumption_id = Column(Integer, ForeignKey("assumptions.id"), nullable=True)
+
+    title = Column(String(255))
+    method = Column(String(100))
+    status = Column(String(50), default="planning")
+
+    # Scientific Method
+    hypothesis = Column(Text)
+    metrics = Column(JSON, default=dict)
+
+    start_date = Column(DateTime, nullable=True)
+    end_date = Column(DateTime, nullable=True)
+
+    project = relationship("Project", back_populates="experiments")
+    assumption = relationship("Assumption", back_populates="experiments")
+
+
+# --- 2. DECISION ROOM ENTITIES ---
+
+
+class DecisionSession(Base):
+    """Represents a live voting round in Slack."""
+
+    __tablename__ = "decision_sessions"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    channel_id = Column(String(255))
+    status = Column(String(50), default="active")
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    project = relationship("Project", back_populates="decisions")
+    votes = relationship("DecisionVote", back_populates="session")
+
+
+class DecisionVote(Base):
+    __tablename__ = "decision_votes"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("decision_sessions.id"))
+    assumption_id = Column(Integer, ForeignKey("assumptions.id"))
+    user_id = Column(String(255))
+
+    vote_type = Column(String(50))
+    value_score = Column(Integer, nullable=True)
+
+    session = relationship("DecisionSession", back_populates="votes")
+    assumption = relationship("Assumption", back_populates="votes")
+
+
+# Create Tables
 Base.metadata.create_all(bind=engine)
 
-class ProjectDB:
-    def get_user_project(self, user_id: str) -> Dict[str, Any]:
-        """Fetch a project + assumptions for a user, matching old API structure."""
+
+# --- 3. UPDATED SERVICE CLASS ---
+class DbService:
+    def create_project(
+        self,
+        user_id: str,
+        name: str,
+        description: str | None = None,
+        phase: str = "Discovery",
+    ) -> Project:
         with SessionLocal() as db:
-            project = self._get_project_by_user_id(db, user_id)
-            project = db.query(Project).options(joinedload(Project.assumptions)).filter(Project.id == project.id).first()
+            project = Project(name=name, description=description, phase=phase, created_by=user_id)
+            db.add(project)
             db.commit()
             db.refresh(project)
-            
-            # Reconstruct the dictionary structure expected by app.py
-            return {
-                "id": project.id,
-                "name": project.name,
-                "phase": project.phase,
-                "progress_score": project.progress_score,
-                "drive_file_id": project.drive_file_id,
-                "experiments": project.experiments,
-                "ai_suggestions": project.ai_suggestions,
-                "roadmap": project.roadmap,
-                "team": project.team,
-                "assumptions": [
-                    {
-                        "id": str(a.id), # Convert to string if UI expects strings
-                        "text": a.text,
-                        "status": a.status,
-                        "category": a.category,
-                        "confidence_score": a.confidence_score,
-                        "last_verified_at": a.last_verified_at.isoformat() if a.last_verified_at else None
-                    } 
-                    for a in project.assumptions
-                ]
-            }
 
-    def get_current_view(self, user_id: str) -> str:
-        """Return the user's current workspace selection."""
-        with SessionLocal() as db:
-            project = db.query(Project).filter(Project.user_id == user_id).first()
-            return project.current_view if project else "overview"
-
-    def set_current_view(self, user_id: str, workspace: str):
-        """Persist workspace navigation state."""
-        with SessionLocal() as db:
-            project = self._get_project_by_user_id(db, user_id)
-            if project:
-                project.current_view = workspace
-                db.commit()
-
-    def link_drive_file(self, user_id: str, file_id: str):
-        """Link a Google Drive file to the project."""
-        with SessionLocal() as db:
-            project = db.query(Project).filter(Project.user_id == user_id).first()
-            if project:
-                project.drive_file_id = file_id
-                db.commit()
-                
-    def save_assumptions(self, user_id: str, assumptions: List[Dict[str, Any]]):
-        """Saves a list of assumptions, replacing existing ones for the user."""
-        with SessionLocal() as db:
-            project = self._get_project_by_user_id(db, user_id)
-            project = db.query(Project).options(joinedload(Project.assumptions)).filter(Project.id == project.id).first()
-
-            project.assumptions.clear()
-            new_assumption_objects = [
-                Assumption(
-                    project_id=project.id,
-                    text=ass_data.get("text"),
-                    category=ass_data.get("category"),
-                    confidence_score=ass_data.get("confidence_score") or ass_data.get("confidence", 0),
-                    status=ass_data.get("status", "active"),
-                ) for ass_data in assumptions
-            ]
-            project.assumptions.extend(new_assumption_objects)
-            project.progress_score = self._calculate_average_confidence(assumptions)
-
+            member = ProjectMember(project_id=project.id, user_id=user_id, role="owner")
+            db.add(member)
             db.commit()
-    
-    def update_assumption_status(self, assumption_id: str, status: str):
-        with SessionLocal() as db:
-            # Handle potential string input from UI
-            try:
-                a_id = int(assumption_id)
-            except ValueError:
-                logging.error(f"Invalid assumption ID: {assumption_id}")
-                return
+            db.refresh(project)
+            return project
 
-            assumption = db.query(Assumption).filter(Assumption.id == a_id).first()
-            if assumption:
-                assumption.status = status
-                assumption.last_checked = dt.datetime.utcnow()
-                if status == "active":
-                    assumption.last_verified_at = dt.datetime.utcnow()
-                db.commit()
-
-    def get_stale_assumptions(self):
-        """Find assumptions not checked in X days (Optimized)."""
-        limit_date = dt.datetime.utcnow() - dt.timedelta(days=Config.STALE_DAYS)
+    def get_active_project(self, user_id: str) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
-            # Fix N+1 query problem by eager loading the project relationship
-            results = db.query(Assumption).options(joinedload(Assumption.project)).filter(
-                Assumption.last_checked < limit_date,
-                Assumption.status == "active"
+            membership = db.query(ProjectMember).filter(ProjectMember.user_id == user_id).first()
+            if not membership or not membership.project:
+                return None
+
+            project = (
+                db.query(Project)
+                .options(
+                    joinedload(Project.assumptions),
+                    joinedload(Project.experiments),
+                    joinedload(Project.members),
+                )
+                .filter(Project.id == membership.project_id)
+                .first()
+            )
+            return self._serialize_project(project) if project else None
+
+    def get_user_projects(self, user_id: str) -> list[dict]:
+        with SessionLocal() as db:
+            memberships = db.query(ProjectMember).options(joinedload(ProjectMember.project)).filter(
+                ProjectMember.user_id == user_id
             ).all()
-            
-            return [
-                {"id": a.id, "text": a.text, "user_id": a.project.user_id} 
-                for a in results if a.project # Check if project exists
-            ]
+            return [{"name": m.project.name, "id": m.project_id} for m in memberships if m.project]
 
-    def _calculate_average_confidence(self, assumptions: List[Any]) -> int:
-        """Internal helper to calc score based on assumption objects or dicts."""
-        # Handle both SQLAlchemy objects and dictionaries
-        active_scores = []
-        for a in assumptions:
-            status = getattr(a, 'status', None) or a.get('status')
-            if status != 'archived':
-                score = getattr(a, 'confidence_score', None) or a.get('confidence_score', 0)
-                active_scores.append(score)
-        
-        if not active_scores:
-            return 0
-        return round(sum(active_scores) / len(active_scores))
+    def create_assumption(self, project_id: int, data: dict) -> Assumption:
+        with SessionLocal() as db:
+            assumption = Assumption(
+                project_id=project_id,
+                title=data.get("title"),
+                description=data.get("description"),
+                category=data.get("category", "desirability"),
+                confidence_score=data.get("confidence", 0),
+                evidence_score=data.get("evidence", 0),
+                impact_score=data.get("impact", 0),
+                status=data.get("status", "suggested"),
+                lane=data.get("lane", "backlog"),
+                provenance=data.get("provenance", []),
+                tags=data.get("tags", []),
+            )
+            db.add(assumption)
+            db.commit()
+            db.refresh(assumption)
+            return assumption
 
-    def _get_project_by_user_id(self, db, user_id: str) -> Project:
-        project = db.query(Project).filter(Project.user_id == user_id).first()
-        if not project:
-            project = Project(user_id=user_id)
-            db.add(project)
-            db.flush()
-        return project
+    def update_assumption_status(self, assumption_id: int, status: str) -> None:
+        with SessionLocal() as db:
+            assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
+            if not assumption:
+                return
+            assumption.status = status
+            db.commit()
+
+    def update_assumption_lane(self, assumption_id: int, lane: str) -> None:
+        with SessionLocal() as db:
+            assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
+            if not assumption:
+                return
+            assumption.lane = lane
+            db.commit()
+
+    def get_assumption(self, assumption_id: int) -> Optional[Dict[str, Any]]:
+        with SessionLocal() as db:
+            assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
+            return self._serialize_assumption(assumption) if assumption else None
+
+    def create_decision_session(self, project_id: int, channel_id: str) -> int:
+        with SessionLocal() as db:
+            session = DecisionSession(project_id=project_id, channel_id=channel_id)
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+            return session.id
+
+    def cast_vote(self, session_id: int, assumption_id: int, user_id: str, vote_type: str) -> None:
+        with SessionLocal() as db:
+            vote = (
+                db.query(DecisionVote)
+                .filter_by(session_id=session_id, assumption_id=assumption_id, user_id=user_id)
+                .first()
+            )
+
+            if not vote:
+                vote = DecisionVote(session_id=session_id, assumption_id=assumption_id, user_id=user_id)
+                db.add(vote)
+
+            vote.vote_type = vote_type
+            db.commit()
+
+    def get_session_results(self, session_id: int) -> Dict[int, Dict[str, int]]:
+        with SessionLocal() as db:
+            votes = db.query(DecisionVote).filter(DecisionVote.session_id == session_id).all()
+            results: Dict[int, Dict[str, int]] = {}
+            for vote in votes:
+                if vote.assumption_id not in results:
+                    results[vote.assumption_id] = {"keep": 0, "kill": 0, "pivot": 0}
+                if vote.vote_type in results[vote.assumption_id]:
+                    results[vote.assumption_id][vote.vote_type] += 1
+            return results
+
+    def _serialize_project(self, project: Project) -> Dict[str, Any]:
+        return {
+            "id": project.id,
+            "name": project.name,
+            "description": project.description,
+            "status": project.status,
+            "phase": project.phase,
+            "innovation_score": project.innovation_score,
+            "velocity": project.velocity,
+            "assumptions": [self._serialize_assumption(a) for a in project.assumptions],
+            "experiments": [
+                {
+                    "id": exp.id,
+                    "title": exp.title,
+                    "method": exp.method,
+                    "status": exp.status,
+                }
+                for exp in project.experiments
+            ],
+            "members": [{"user_id": member.user_id, "role": member.role} for member in project.members],
+        }
+
+    def _serialize_assumption(self, assumption: Assumption) -> Dict[str, Any]:
+        return {
+            "id": assumption.id,
+            "title": assumption.title,
+            "description": assumption.description,
+            "category": assumption.category,
+            "status": assumption.status,
+            "lane": assumption.lane,
+            "confidence_score": assumption.confidence_score,
+            "evidence_score": assumption.evidence_score,
+            "impact_score": assumption.impact_score,
+            "provenance": assumption.provenance,
+            "tags": assumption.tags,
+        }
