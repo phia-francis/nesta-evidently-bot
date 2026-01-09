@@ -485,7 +485,7 @@ def end_session(ack, body, client):  # noqa: ANN001
 
     text = "*🏁 Voting Session Complete!*\n\n"
     for assumption_id, votes in results.items():
-        text += f"• Assumption {assumption_id}: {votes['keep']} Keep, {votes['kill']} Kill\n"
+        text += f"• Assumption {assumption_id}: {votes['keep']} Keep, {votes.get('pivot', 0)} Pivot, {votes['kill']} Kill\n"
 
     client.chat_postMessage(channel=body["channel"]["id"], text=text)
 
