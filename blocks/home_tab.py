@@ -80,6 +80,11 @@ def get_home_view(project: Dict[str, Any], tip: str | None = None) -> dict:
                     "text": {"type": "plain_text", "text": "🗳️ Decision Room"},
                     "action_id": "trigger_decision_room",
                 },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "🔄 Refresh"},
+                    "action_id": "refresh_home",
+                },
             ],
         }
     )

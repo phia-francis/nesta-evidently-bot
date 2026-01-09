@@ -62,6 +62,13 @@ def publish_home_tab(client, user_id: str) -> None:
     client.views_publish(user_id=user_id, view=view)
 
 
+@app.action("refresh_home")
+def refresh_home(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    publish_home_tab(client, user_id)
+
+
 @app.action("setup_step_1")
 def start_setup(ack, body, client):  # noqa: ANN001
     ack()
