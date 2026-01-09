@@ -48,7 +48,7 @@ def update_home_tab(client, event, logger):  # noqa: ANN001
         user_id = event["user"]
         project_data = db_service.get_active_project(user_id)
         if project_data:
-            home_view = get_home_view(project_data)
+            home_view = get_home_view(project_data, playbook.get_random_tip())
         else:
             home_view = get_onboarding_welcome()
         client.views_publish(user_id=user_id, view=home_view)
@@ -58,7 +58,7 @@ def update_home_tab(client, event, logger):  # noqa: ANN001
 
 def publish_home_tab(client, user_id: str) -> None:
     project_data = db_service.get_active_project(user_id)
-    view = get_home_view(project_data) if project_data else get_onboarding_welcome()
+    view = get_home_view(project_data, playbook.get_random_tip()) if project_data else get_onboarding_welcome()
     client.views_publish(user_id=user_id, view=view)
 
 
@@ -148,6 +148,18 @@ def open_create_assumption_modal(ack, body, client):  # noqa: ANN001
                     "label": {"type": "plain_text", "text": "Confidence Score (0-100)"},
                     "element": {"type": "plain_text_input", "action_id": "confidence_input"},
                 },
+                {
+                    "type": "input",
+                    "block_id": "assumption_evidence",
+                    "label": {"type": "plain_text", "text": "Evidence Score (0-100)"},
+                    "element": {"type": "plain_text_input", "action_id": "evidence_input"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_impact",
+                    "label": {"type": "plain_text", "text": "Impact Score (0-100)"},
+                    "element": {"type": "plain_text_input", "action_id": "impact_input"},
+                },
             ],
             "submit": {"type": "plain_text", "text": "Add"},
         },
@@ -163,10 +175,20 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
         title = values["assumption_title"]["title_input"]["value"]
         category = values["assumption_category"]["category_input"]["selected_option"]["value"]
         confidence_text = values["assumption_confidence"]["confidence_input"]["value"]
+        evidence_text = values["assumption_evidence"]["evidence_input"]["value"]
+        impact_text = values["assumption_impact"]["impact_input"]["value"]
         try:
             confidence = max(0, min(100, int(confidence_text)))
         except ValueError:
             confidence = 0
+        try:
+            evidence = max(0, min(100, int(evidence_text)))
+        except ValueError:
+            evidence = 0
+        try:
+            impact = max(0, min(100, int(impact_text)))
+        except ValueError:
+            impact = 0
 
         project = db_service.get_active_project(user_id)
         if not project:
@@ -179,10 +201,12 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
                 "title": title,
                 "category": category,
                 "confidence": confidence,
+                "evidence": evidence,
+                "impact": impact,
                 "lane": "backlog",
             },
         )
-        home_view = get_home_view(db_service.get_active_project(user_id))
+        home_view = get_home_view(db_service.get_active_project(user_id), playbook.get_random_tip())
         client.views_publish(user_id=user_id, view=home_view)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to create assumption: %s", exc, exc_info=True)
@@ -207,6 +231,9 @@ def open_experiment_browser(ack, body, client):  # noqa: ANN001
     else:
         for method in recommendations:
             blocks.extend(NestaUI.method_card(method))
+            tip = method.get("nesta_tip")
+            if tip:
+                blocks.append(NestaUI.tip_panel(tip))
             blocks.append(
                 {
                     "type": "actions",
@@ -242,6 +269,13 @@ def confirm_experiment_method(ack, body, client):  # noqa: ANN001
         channel=body["user"]["id"],
         user=body["user"]["id"],
         text=f"✅ Selected {method_name} for assumption {assumption_id}.",
+    )
+
+    tip = playbook.get_random_tip()
+    client.chat_postMessage(
+        channel=body["user"]["id"],
+        blocks=[NestaUI.tip_panel(tip)],
+        text=f"Nesta tip: {tip}",
     )
 
 

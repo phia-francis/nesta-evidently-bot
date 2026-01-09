@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 from blocks.nesta_ui import NestaUI
 
 
-def get_home_view(project: Dict[str, Any]) -> dict:
+def get_home_view(project: Dict[str, Any], tip: str | None = None) -> dict:
     blocks: List[dict] = [
         NestaUI.header(f"🚀 {project['name']}"),
         {
@@ -37,7 +37,8 @@ def get_home_view(project: Dict[str, Any]) -> dict:
                     text=(
                         f"*{item['title']}*\n"
                         f"Confidence: {item.get('confidence_score', 0)}% | "
-                        f"Evidence: {item.get('evidence_score', 0)}%"
+                        f"Evidence: {item.get('evidence_score', 0)}% | "
+                        f"Impact: {item.get('impact_score', 0)}%"
                     ),
                     accessory={
                         "type": "overflow",
@@ -82,5 +83,8 @@ def get_home_view(project: Dict[str, Any]) -> dict:
             ],
         }
     )
+
+    if tip:
+        blocks.append(NestaUI.tip_panel(tip))
 
     return {"type": "home", "blocks": blocks}
