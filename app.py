@@ -1,5 +1,4 @@
 import logging
-import re
 import threading
 import time
 
@@ -12,20 +11,19 @@ from blocks.interactions import (
     case_study_modal,
     error_block,
     get_ai_summary_block,
-    get_decision_room_blocks,
     get_loading_block,
-    get_nudge_block,
 )
+from blocks.nesta_ui import NestaUI
+from blocks.onboarding import get_onboarding_welcome, get_setup_step_1_modal, get_setup_step_2_modal
 from blocks.modals import experiment_modal
 from blocks.methods_ui import method_cards
 from config import Config
 from services import knowledge_base
 from services.ai_service import EvidenceAI
-from services.db_service import ProjectDB
-from services.chart_service import ChartService
-from services.decision_service import DecisionRoom
-from services.drive_service import DriveService
+from services.db_service import DbService
+from services.decision_service import DecisionRoomService
 from services.google_workspace_service import GoogleWorkspaceService
+from services.playbook_service import PlaybookService
 
 
 logging.basicConfig(level=logging.INFO)
@@ -33,10 +31,9 @@ logger = logging.getLogger(__name__)
 
 app = App(token=Config.SLACK_BOT_TOKEN, signing_secret=Config.SLACK_SIGNING_SECRET)
 ai_service = EvidenceAI()
-db_service = ProjectDB()
-decision_service = DecisionRoom()
-
-drive_service = DriveService()
+db_service = DbService()
+decision_service = DecisionRoomService(db_service)
+playbook = PlaybookService()
 try:
     google_workspace_service = GoogleWorkspaceService()
 except Exception:  # noqa: BLE001
@@ -49,26 +46,244 @@ except Exception:  # noqa: BLE001
 def update_home_tab(client, event, logger):  # noqa: ANN001
     try:
         user_id = event["user"]
-        project_data = db_service.get_user_project(user_id)
-        current_workspace = db_service.get_current_view(user_id)
-        home_view = get_home_view(user_id, project_data, current_workspace)
+        project_data = db_service.get_active_project(user_id)
+        if project_data:
+            home_view = get_home_view(project_data, playbook.get_random_tip())
+        else:
+            home_view = get_onboarding_welcome()
         client.views_publish(user_id=user_id, view=home_view)
     except Exception as exc:  # noqa: BLE001
         logger.error("Error publishing home tab: %s", exc, exc_info=True)
 
 
-@app.action(re.compile(r"^navigate_workspace_.*"))
-def handle_navigation(ack, body, client, logger):  # noqa: ANN001
+def publish_home_tab(client, user_id: str) -> None:
+    project_data = db_service.get_active_project(user_id)
+    view = get_home_view(project_data, playbook.get_random_tip()) if project_data else get_onboarding_welcome()
+    client.views_publish(user_id=user_id, view=view)
+
+
+@app.action("refresh_home")
+def refresh_home(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
-    workspace = body["actions"][0]["value"]
+    publish_home_tab(client, user_id)
+
+
+@app.action("setup_step_1")
+def start_setup(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(trigger_id=body["trigger_id"], view=get_setup_step_1_modal())
+
+
+@app.view("setup_step_2_submit")
+def handle_step_1(ack, body, client):  # noqa: ANN001
+    problem = body["view"]["state"]["values"]["problem_block"]["problem_input"]["value"]
+    ack(response_action="push", view=get_setup_step_2_modal(problem))
+
+
+@app.view("setup_final_submit")
+def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
     try:
-        db_service.set_current_view(user_id, workspace)
-        project_data = db_service.get_user_project(user_id)
-        view = get_home_view(user_id, project_data, workspace)
-        client.views_publish(user_id=user_id, view=view)
+        data = body["view"]["state"]["values"]
+        problem = body["view"]["private_metadata"]
+        name = data["name_block"]["name_input"]["value"]
+        phase = data["phase_block"]["phase_input"]["selected_option"]["value"]
+
+        db_service.create_project(user_id, name, description=problem, phase=phase)
+
+        client.chat_postMessage(
+            channel=user_id,
+            blocks=[
+                NestaUI.header(f"🎉 {name} is live!"),
+                NestaUI.section(
+                    f"We've set your phase to *{phase}*.\nAdd your first assumption to start de-risking."
+                ),
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "+ Add Assumption"},
+                            "action_id": "open_create_assumption",
+                        }
+                    ],
+                },
+            ],
+            text="Project created",
+        )
+        publish_home_tab(client, user_id)
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to handle navigation: %s", exc, exc_info=True)
+        logger.error("Failed to complete setup: %s", exc, exc_info=True)
+
+
+@app.action("open_create_assumption")
+def open_create_assumption_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "create_assumption_submit",
+            "title": {"type": "plain_text", "text": "New Assumption"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "assumption_title",
+                    "label": {"type": "plain_text", "text": "Assumption"},
+                    "element": {"type": "plain_text_input", "action_id": "title_input"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_category",
+                    "label": {"type": "plain_text", "text": "Category"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "category_input",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "Desirability"}, "value": "desirability"},
+                            {"text": {"type": "plain_text", "text": "Viability"}, "value": "viability"},
+                            {"text": {"type": "plain_text", "text": "Feasibility"}, "value": "feasibility"},
+                            {"text": {"type": "plain_text", "text": "Ethics"}, "value": "ethics"},
+                        ],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_confidence",
+                    "label": {"type": "plain_text", "text": "Confidence Score (0-100)"},
+                    "element": {"type": "plain_text_input", "action_id": "confidence_input"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_evidence",
+                    "label": {"type": "plain_text", "text": "Evidence Score (0-100)"},
+                    "element": {"type": "plain_text_input", "action_id": "evidence_input"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_impact",
+                    "label": {"type": "plain_text", "text": "Impact Score (0-100)"},
+                    "element": {"type": "plain_text_input", "action_id": "impact_input"},
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Add"},
+        },
+    )
+
+
+@app.view("create_assumption_submit")
+def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        values = body["view"]["state"]["values"]
+        title = values["assumption_title"]["title_input"]["value"]
+        category = values["assumption_category"]["category_input"]["selected_option"]["value"]
+        confidence_text = values["assumption_confidence"]["confidence_input"]["value"]
+        evidence_text = values["assumption_evidence"]["evidence_input"]["value"]
+        impact_text = values["assumption_impact"]["impact_input"]["value"]
+        try:
+            confidence = max(0, min(100, int(confidence_text)))
+        except ValueError:
+            confidence = 0
+        try:
+            evidence = max(0, min(100, int(evidence_text)))
+        except ValueError:
+            evidence = 0
+        try:
+            impact = max(0, min(100, int(impact_text)))
+        except ValueError:
+            impact = 0
+
+        project = db_service.get_active_project(user_id)
+        if not project:
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+            return
+
+        db_service.create_assumption(
+            project_id=project["id"],
+            data={
+                "title": title,
+                "category": category,
+                "confidence": confidence,
+                "evidence": evidence,
+                "impact": impact,
+                "lane": "backlog",
+            },
+        )
+        home_view = get_home_view(db_service.get_active_project(user_id), playbook.get_random_tip())
+        client.views_publish(user_id=user_id, view=home_view)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to create assumption: %s", exc, exc_info=True)
+
+
+@app.action("design_experiment")
+def open_experiment_browser(ack, body, client):  # noqa: ANN001
+    ack()
+    assumption_id, category = body["actions"][0]["value"].split(":")
+    recommendations = playbook.get_recommendations(category)
+
+    blocks = [
+        NestaUI.header("📖 Test & Learn Playbook"),
+        NestaUI.section(
+            f"Based on your assumption category (*{category}*), here are recommended methods from the Nesta Playbook:"
+        ),
+        NestaUI.divider(),
+    ]
+
+    if not recommendations:
+        blocks.append(NestaUI.section("No methods found for this category yet."))
+    else:
+        for method in recommendations:
+            blocks.extend(NestaUI.method_card(method))
+            tip = method.get("nesta_tip")
+            if tip:
+                blocks.append(NestaUI.tip_panel(tip))
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": f"Select {method['name']}"},
+                            "value": f"{assumption_id}:{method['id']}",
+                            "action_id": "confirm_experiment_method",
+                        }
+                    ],
+                }
+            )
+            blocks.append(NestaUI.divider())
+
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "title": {"type": "plain_text", "text": "Select Method"},
+            "blocks": blocks,
+        },
+    )
+
+
+@app.action("confirm_experiment_method")
+def confirm_experiment_method(ack, body, client):  # noqa: ANN001
+    ack()
+    assumption_id, method_id = body["actions"][0]["value"].split(":")
+    method = playbook.get_method_details(method_id)
+    method_name = method["name"] if method else method_id
+    client.chat_postEphemeral(
+        channel=body["user"]["id"],
+        user=body["user"]["id"],
+        text=f"✅ Selected {method_name} for assumption {assumption_id}.",
+    )
+
+    tip = playbook.get_random_tip()
+    client.chat_postMessage(
+        channel=body["user"]["id"],
+        blocks=[NestaUI.tip_panel(tip)],
+        text=f"Nesta tip: {tip}",
+    )
 
 
 # --- 2. 'SO WHAT?' AI SUMMARISER WITH LIVE STATUS ---
@@ -161,12 +376,12 @@ def handle_nudge_action(ack, body, client, logger):  # noqa: ANN001
                 text=f"Generating experiment for assumption {assumption_id}...",
             )
         elif action_type == "val":
-            db_service.update_assumption_status(assumption_id, "active")
+            db_service.update_assumption_status(int(assumption_id), "active")
             client.chat_postEphemeral(
                 channel=body["channel_id"], user=user_id, text=f"Assumption {assumption_id} marked as validated."
             )
         elif action_type == "arch":
-            db_service.update_assumption_status(assumption_id, "archived")
+            db_service.update_assumption_status(int(assumption_id), "archived")
             client.chat_postEphemeral(
                 channel=body["channel_id"], user=user_id, text=f"Assumption {assumption_id} archived."
             )
@@ -185,7 +400,7 @@ def handle_keep(ack, body, client, logger):  # noqa: ANN001
     try:
         user_id = body["user"]["id"]
         assumption_id = body["actions"][0]["value"]
-        db_service.update_assumption_status(assumption_id, "active")
+        db_service.update_assumption_status(int(assumption_id), "active")
         client.chat_postMessage(channel=user_id, text=f"✅ Assumption {assumption_id} marked as active.")
     except Exception as exc:  # noqa: BLE001
         logger.error("Error in handle_keep action: %s", exc, exc_info=True)
@@ -197,78 +412,10 @@ def handle_archive(ack, body, client, logger):  # noqa: ANN001
     try:
         user_id = body["user"]["id"]
         assumption_id = body["actions"][0]["value"]
-        db_service.update_assumption_status(assumption_id, "archived")
+        db_service.update_assumption_status(int(assumption_id), "archived")
         client.chat_postMessage(channel=user_id, text=f"🗑️ Assumption {assumption_id} archived.")
     except Exception as exc:  # noqa: BLE001
         logger.error("Error in handle_archive action: %s", exc, exc_info=True)
-
-
-# --- 4. GOOGLE DRIVE SYNC ---
-@app.command("/evidently-link-doc")
-def link_google_doc(ack, body, client, logger):  # noqa: ANN001
-    ack()
-    user_id = body["user_id"]
-    doc_url = body.get("text", "").strip()
-    try:
-        file_id = drive_service.extract_id_from_url(doc_url)
-        if not file_id:
-            client.chat_postEphemeral(channel=user_id, user=user_id, text="Please provide a valid Google Doc URL or ID.")
-            return
-
-        db_service.link_drive_file(user_id, file_id)
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="🔗 Linked document. Starting first sync...")
-
-        content = drive_service.get_file_content(file_id)
-        if not content:
-            client.chat_postEphemeral(channel=user_id, user=user_id, text="I couldn't read that document. Check sharing settings.")
-            return
-
-        analysis = ai_service.analyze_thread_structured(content)
-        if analysis.get("error"):
-            client.chat_postEphemeral(channel=user_id, user=user_id, text="AI could not parse the document.")
-            return
-
-        db_service.save_assumptions(user_id, analysis.get("assumptions", []))
-        client.chat_postEphemeral(
-            channel=user_id,
-            user=user_id,
-            text=f"✅ Synced {len(analysis.get('assumptions', []))} assumptions from the document.",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Error linking Google Doc: %s", exc, exc_info=True)
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="Sync failed. Please try again later.")
-
-
-@app.action("trigger_evidence_sync")
-def handle_sync(ack, body, client, logger):  # noqa: ANN001
-    ack()
-    user_id = body["user"]["id"]
-    try:
-        project = db_service.get_user_project(user_id)
-        file_id = project.get("drive_file_id")
-        if not file_id:
-            client.chat_postMessage(channel=user_id, text="Link a document first with /evidently-link-doc.")
-            return
-
-        client.chat_postMessage(channel=user_id, text="🔄 Syncing with Google Drive... reading your assumption log.")
-        doc_text = drive_service.get_file_content(file_id)
-        if not doc_text:
-            client.chat_postMessage(channel=user_id, text="⚠️ I couldn't access the file. Did you share it with me?")
-            return
-
-        analysis = ai_service.analyze_thread_structured(doc_text)
-        if analysis.get("error"):
-            client.chat_postMessage(channel=user_id, text="❌ Sync failed while parsing the document.")
-            return
-
-        db_service.save_assumptions(user_id, analysis.get("assumptions", []))
-        client.chat_postMessage(
-            channel=user_id,
-            text=f"✅ Sync complete. Found {len(analysis.get('assumptions', []))} assumptions.",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Error in handle_sync action: %s", exc, exc_info=True)
-        client.chat_postMessage(channel=user_id, text="❌ Sync Failed: An unexpected error occurred.")
 
 
 @app.action("gen_experiment_modal")
@@ -284,44 +431,64 @@ def handle_gen_experiment(ack, body, client, logger):  # noqa: ANN001
 
 
 # --- 5. DECISION ROOM ---
-@app.action("start_decision_session")
-def start_decision_room(ack, body, client, logger):  # noqa: ANN001
+@app.action("trigger_decision_room")
+def open_decision_room(ack, body, client):  # noqa: ANN001
     ack()
-    try:
-        channel_id = body.get("channel", {}).get("id") or body.get("channel_id")
-        if not channel_id:
-            return
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "start_decision_submit",
+            "title": {"type": "plain_text", "text": "Start Decision Room"},
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "Pick a channel to host the voting session."},
+                },
+                {
+                    "type": "input",
+                    "block_id": "channel_select",
+                    "element": {"type": "channels_select", "action_id": "selected_channel"},
+                    "label": {"type": "plain_text", "text": "Channel"},
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Start Voting"},
+        },
+    )
 
-        session_id = decision_service.create_session(channel_id, "Prioritise Assumptions")
-        client.chat_postMessage(
-            channel=channel_id,
-            blocks=get_decision_room_blocks(session_id, "waiting"),
-            text="Decision Room Opened",
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Error opening decision room: %s", exc, exc_info=True)
 
-
-@app.action("reveal_decision_votes")
-def reveal_decision_votes(ack, body, client, logger):  # noqa: ANN001
+@app.view("start_decision_submit")
+def start_decision_room(ack, body, client, view):  # noqa: ANN001
     ack()
-    try:
-        session_id = body["actions"][0]["value"]
-        channel_id = body.get("channel", {}).get("id") or body.get("channel_id")
-        votes = decision_service.get_votes(session_id)
-        results = decision_service.reveal_votes(session_id)
-        if not results:
-            client.chat_postEphemeral(channel=channel_id, user=body["user"]["id"], text="Session not found.")
-            return
+    user_id = body["user"]["id"]
+    channel_id = view["state"]["values"]["channel_select"]["selected_channel"]["selected_channel"]
 
-        results["heatmap_url"] = ChartService.generate_decision_heatmap(votes)
-        client.chat_postMessage(
-            channel=channel_id,
-            blocks=get_decision_room_blocks(session_id, "revealed", results),
-            text="Votes revealed",
+    success, message = decision_service.start_session(client, channel_id, user_id)
+    if not success:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text=f"❌ {message}")
+
+
+@app.action("vote_keep")
+@app.action("vote_kill")
+@app.action("vote_pivot")
+def handle_voting(ack, body, client):  # noqa: ANN001
+    ack()
+    decision_service.handle_vote(body, client)
+
+
+@app.action("end_decision_session")
+def end_session(ack, body, client):  # noqa: ANN001
+    ack()
+    session_id = body["actions"][0]["value"]
+    results = db_service.get_session_results(int(session_id))
+
+    text = "*🏁 Voting Session Complete!*\n\n"
+    for assumption_id, votes in results.items():
+        text += (
+            f"• Assumption {assumption_id}: {votes['keep']} Keep, {votes['pivot']} Pivot, {votes['kill']} Kill\n"
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Error revealing votes: %s", exc, exc_info=True)
+
+    client.chat_postMessage(channel=body["channel"]["id"], text=text)
 
 
 # --- 6. METHODS AND CASE STUDIES ---
@@ -336,32 +503,6 @@ def handle_methods(ack, body, respond, logger):  # noqa: ANN001
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to handle methods command", exc_info=True)
         respond("Unable to share methods right now.")
-
-
-@app.command("/evidently-vote")
-def cast_vote(ack, body, respond, logger):  # noqa: ANN001
-    ack()
-    user_id = body.get("user_id")
-    channel_id = body.get("channel_id")
-    text = (body.get("text") or "").strip()
-    parts = text.split()
-    if len(parts) < 2:
-        respond("Please provide impact and uncertainty scores, e.g. `/evidently-vote 4 2`.")
-        return
-
-    try:
-        impact, uncertainty = int(parts[0]), int(parts[1])
-        session_id = decision_service.get_active_session(channel_id)
-        if not session_id:
-            respond("No open Decision Room found in this channel. Start one from the Team tab.")
-            return
-        decision_service.cast_vote(session_id, user_id, impact, uncertainty)
-        respond(f"Vote recorded: impact {impact}, uncertainty {uncertainty}. Your vote stays hidden until reveal.")
-    except ValueError:
-        respond("Scores must be numbers, e.g. `/evidently-vote 5 3`.")
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to record vote", exc_info=True)
-        respond("Could not record your vote just now.")
 
 
 @app.action("view_case_study")
@@ -380,16 +521,22 @@ def handle_assumption_overflow(ack, body, client, logger):  # noqa: ANN001
     ack()
     try:
         action_value = body["actions"][0]["selected_option"]["value"]
-        action, assumption_id = action_value.split("::", 1)
+        assumption_id, action = action_value.split(":", 1)
         user_id = body["user"]["id"]
-        message = {
-            "roadmap": "Added to roadmap backlog.",
-            "experiment": "I'll help you design an experiment soon.",
-            "archive": "Assumption archived from the canvas.",
-        }.get(action, "Action received.")
-        client.chat_postEphemeral(channel=user_id, user=user_id, text=message)
-        if action == "archive":
-            db_service.update_assumption_status(assumption_id, "archived")
+
+        if action in {"now", "next", "later"}:
+            db_service.update_assumption_lane(int(assumption_id), action)
+            client.chat_postEphemeral(channel=user_id, user=user_id, text=f"Moved to {action.title()}.")
+        elif action == "exp":
+            assumption = db_service.get_assumption(int(assumption_id))
+            if not assumption:
+                client.chat_postEphemeral(channel=user_id, user=user_id, text="Assumption not found.")
+                return
+            trigger_id = body.get("trigger_id")
+            suggestions = ai_service.generate_experiment_suggestions(assumption["title"])
+            client.views_open(trigger_id=trigger_id, view=experiment_modal(assumption["title"], suggestions))
+        else:
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Action received.")
     except Exception as exc:  # noqa: BLE001
         logger.error("Overflow action failed", exc_info=True)
 
@@ -403,9 +550,12 @@ def export_slides(ack, body, respond, logger):  # noqa: ANN001
         if not google_workspace_service:
             respond("Google Workspace is not configured.")
             return
-        project = db_service.get_user_project(user_id)
+        project = db_service.get_active_project(user_id)
+        if not project:
+            respond("Please complete onboarding to create a project first.")
+            return
         slides = [
-            f"Opportunity confidence: {project.get('progress_score', 0)}%",
+            f"Innovation score: {project.get('innovation_score', 0)}%",
             f"Active assumptions: {len(project.get('assumptions', []))}",
             "Roadmap overview: Now / Next / Later",
         ]
