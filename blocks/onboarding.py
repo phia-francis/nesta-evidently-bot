@@ -1,4 +1,6 @@
-from slack_sdk.models.blocks import InputBlock, Option, PlainTextInputElement, RadioButtonsElement
+from slack_sdk.models.blocks import InputBlock
+from slack_sdk.models.blocks.block_elements import PlainTextInputElement, RadioButtonsElement
+from slack_sdk.models.objects import Option, PlainTextObject
 
 from blocks.nesta_ui import NestaUI
 
@@ -75,11 +77,11 @@ def get_setup_step_2_modal(problem_statement: str) -> dict:
                     action_id="phase_input",
                     options=[
                         Option(
-                            text={"type": "plain_text", "text": "Discovery (Understanding needs)"},
+                            text=PlainTextObject(text="Discovery (Understanding needs)"),
                             value="Discovery",
                         ),
-                        Option(text={"type": "plain_text", "text": "Alpha (Testing solutions)"}, value="Alpha"),
-                        Option(text={"type": "plain_text", "text": "Beta (Scaling)"}, value="Beta"),
+                        Option(text=PlainTextObject(text="Alpha (Testing solutions)"), value="Alpha"),
+                        Option(text=PlainTextObject(text="Beta (Scaling)"), value="Beta"),
                     ],
                 ),
             ).to_dict(),

@@ -4,7 +4,8 @@ from slack_sdk.models.blocks import (
     HeaderBlock,
     SectionBlock,
 )
-from slack_sdk.models.blocks.block_elements import Button
+from slack_sdk.models.blocks.block_elements import ButtonElement as Button
+from slack_sdk.models.objects import PlainTextObject
 
 from services.db_service import DbService
 
@@ -48,18 +49,18 @@ class DecisionRoomService:
                 ActionsBlock(
                     elements=[
                         Button(
-                            text="✅ Test This",
+                            text=PlainTextObject(text="✅ Test This"),
                             value=f"{session_id}:{assumption['id']}:keep",
                             action_id="vote_keep",
                             style="primary",
                         ),
                         Button(
-                            text="⚠️ Pivot",
+                            text=PlainTextObject(text="⚠️ Pivot"),
                             value=f"{session_id}:{assumption['id']}:pivot",
                             action_id="vote_pivot",
                         ),
                         Button(
-                            text="🗑️ Kill",
+                            text=PlainTextObject(text="🗑️ Kill"),
                             value=f"{session_id}:{assumption['id']}:kill",
                             action_id="vote_kill",
                             style="danger",
@@ -73,7 +74,7 @@ class DecisionRoomService:
             ActionsBlock(
                 elements=[
                     Button(
-                        text="🏁 End Session & Tally",
+                        text=PlainTextObject(text="🏁 End Session & Tally"),
                         value=str(session_id),
                         action_id="end_decision_session",
                         style="primary",
