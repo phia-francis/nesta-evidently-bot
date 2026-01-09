@@ -5,7 +5,7 @@ from slack_sdk.models.blocks import (
     SectionBlock,
 )
 from slack_sdk.models.blocks.block_elements import ButtonElement as Button
-from slack_sdk.models.objects import PlainTextObject
+from slack_sdk.models.blocks import PlainTextObject
 
 from services.db_service import DbService
 

@@ -1,8 +1,7 @@
 from enum import Enum
 
-from slack_sdk.models.blocks import InputBlock
+from slack_sdk.models.blocks import InputBlock, Option, PlainTextObject
 from slack_sdk.models.blocks.block_elements import PlainTextInputElement, RadioButtonsElement
-from slack_sdk.models.objects import Option, PlainTextObject
 
 from blocks.nesta_ui import NestaUI
 
