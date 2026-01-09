@@ -18,6 +18,7 @@ class Config:
     # Thresholds
     CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", 0.8))
     STALE_DAYS = int(os.environ.get("STALE_DAYS", 14))
+    NESTA_TIP_ICON_URL = os.environ.get("NESTA_TIP_ICON_URL", "https://emojicdn.elk.sh/💡")
 
 
 class Brand:

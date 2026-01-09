@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -10,41 +11,62 @@ logger = logging.getLogger(__name__)
 
 
 class DriveService:
-    SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+    SCOPES = [
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/documents.readonly",
+    ]
 
     def __init__(self):
+        self.creds = None
+        self.drive_service = None
+        self.docs_service = None
         try:
             self.creds = self._get_credentials()
-            self.drive_service = build("drive", "v3", credentials=self.creds)
-            self.docs_service = build("docs", "v1", credentials=self.creds)
+            if self.creds:
+                self.drive_service = build("drive", "v3", credentials=self.creds)
+                self.docs_service = build("docs", "v1", credentials=self.creds)
         except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to initialize Google Drive clients", exc_info=True)
-            raise
+            logger.warning("Failed to initialize Google Drive clients: %s", exc)
 
     def _get_credentials(self):
-        """Loads credentials from the environment variable string."""
         json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if not json_str:
-            raise ValueError("Missing GOOGLE_SERVICE_ACCOUNT_JSON in environment.")
+        if json_str:
+            info = json.loads(json_str)
+            return service_account.Credentials.from_service_account_info(info, scopes=self.SCOPES)
 
-        info = json.loads(json_str)
-        return service_account.Credentials.from_service_account_info(info, scopes=self.SCOPES)
+        if os.path.exists("service_account.json"):
+            return service_account.Credentials.from_service_account_file("service_account.json", scopes=self.SCOPES)
+
+        return None
 
     def get_file_content(self, file_id: str) -> str | None:
-        """Fetch text content from a Google Doc."""
+        if not self.docs_service:
+            return None
         try:
             document = self.docs_service.documents().get(documentId=file_id).execute()
             content = document.get("body", {}).get("content")
             return self._read_structural_elements(content)
-        except HttpError as exc:
+        except HttpError:
             logger.error("Failed to read Google Doc %s", file_id, exc_info=True)
             return None
-        except Exception as exc:  # noqa: BLE001
+        except Exception:
             logger.error("Unexpected error reading Google Doc %s", file_id, exc_info=True)
             return None
 
+    def get_file_metadata(self, file_id: str) -> dict | None:
+        if not self.drive_service:
+            return None
+        try:
+            return self.drive_service.files().get(
+                fileId=file_id,
+                fields="id, name, mimeType, webViewLink",
+            ).execute()
+        except Exception:
+            logger.error("Failed to read Google Drive metadata for %s", file_id, exc_info=True)
+            return None
+
     def _read_structural_elements(self, elements):
-        """Recursively extracts text from the Google Docs JSON structure."""
         text_parts = []
         if not elements:
             return ""
@@ -64,11 +86,20 @@ class DriveService:
                     text_parts.append("\n")
         return "".join(text_parts)
 
-    def extract_id_from_url(self, url: str) -> str | None:
-        """Parses a Google Doc URL to find the File ID."""
-        try:
-            if "/d/" in url:
-                return url.split("/d/")[1].split("/")[0]
-            return url
-        except Exception:  # noqa: BLE001
-            return None
+    def extract_id_from_url(self, url: str) -> tuple[str | None, str | None]:
+        if not url:
+            return None, None
+
+        folder_match = re.search(r"folders/([a-zA-Z0-9-_]+)", url)
+        if folder_match:
+            return folder_match.group(1), "drive_folder"
+
+        file_match = re.search(r"/d/([a-zA-Z0-9-_]+)", url)
+        if file_match:
+            return file_match.group(1), "drive_file"
+
+        cleaned = url.strip()
+        if re.fullmatch(r"[a-zA-Z0-9-_]+", cleaned):
+            return cleaned, "drive_file"
+
+        return None, None
