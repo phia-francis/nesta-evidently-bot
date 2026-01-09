@@ -1,5 +1,7 @@
 from slack_sdk.models.blocks import ContextBlock, DividerBlock, HeaderBlock, ImageBlock, SectionBlock
 
+from config import Config
+
 
 class NestaUI:
     """
@@ -23,7 +25,7 @@ class NestaUI:
     def tip_panel(text: str) -> dict:
         return ContextBlock(
             elements=[
-                ImageBlock(image_url="https://emojicdn.elk.sh/💡", alt_text="idea").to_dict(),
+                ImageBlock(image_url=Config.NESTA_TIP_ICON_URL, alt_text="idea").to_dict(),
                 {"type": "mrkdwn", "text": f"*Nesta Tip:* {text}"},
             ]
         ).to_dict()

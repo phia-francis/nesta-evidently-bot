@@ -98,4 +98,8 @@ class DriveService:
         if file_match:
             return file_match.group(1), "drive_file"
 
-        return url.strip(), "drive_file"
+        cleaned = url.strip()
+        if re.fullmatch(r"[a-zA-Z0-9-_]+", cleaned):
+            return cleaned, "drive_file"
+
+        return None, None

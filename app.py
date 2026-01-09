@@ -184,18 +184,17 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
         confidence_text = values["assumption_confidence"]["confidence_input"]["value"]
         evidence_text = values["assumption_evidence"]["evidence_input"]["value"]
         impact_text = values["assumption_impact"]["impact_input"]["value"]
-        try:
-            confidence = max(0, min(100, int(confidence_text)))
-        except ValueError:
-            confidence = 0
-        try:
-            evidence = max(0, min(100, int(evidence_text)))
-        except ValueError:
-            evidence = 0
-        try:
-            impact = max(0, min(100, int(impact_text)))
-        except ValueError:
-            impact = 0
+        scores = {}
+        for name, text_value in {
+            "confidence": confidence_text,
+            "evidence": evidence_text,
+            "impact": impact_text,
+        }.items():
+            try:
+                scores[name] = max(0, min(100, int(text_value)))
+            except (ValueError, TypeError):
+                scores[name] = 0
+        confidence, evidence, impact = scores["confidence"], scores["evidence"], scores["impact"]
 
         project = db_service.get_active_project(user_id)
         if not project:
@@ -483,10 +482,11 @@ def end_session(ack, body, client):  # noqa: ANN001
     results = db_service.get_session_results(int(session_id))
 
     text = "*🏁 Voting Session Complete!*\n\n"
-    for assumption_id, votes in results.items():
-        text += (
-            f"• Assumption {assumption_id}: {votes['keep']} Keep, {votes['pivot']} Pivot, {votes['kill']} Kill\n"
-        )
+    summary_lines = [
+        f"• Assumption {assumption_id}: {votes['keep']} Keep, {votes['pivot']} Pivot, {votes['kill']} Kill"
+        for assumption_id, votes in results.items()
+    ]
+    text += "\n".join(summary_lines)
 
     client.chat_postMessage(channel=body["channel"]["id"], text=text)
 
@@ -524,7 +524,7 @@ def handle_assumption_overflow(ack, body, client, logger):  # noqa: ANN001
         assumption_id, action = action_value.split(":", 1)
         user_id = body["user"]["id"]
 
-        if action in {"now", "next", "later"}:
+        if action in {"backlog", "now", "next", "later"}:
             db_service.update_assumption_lane(int(assumption_id), action)
             client.chat_postEphemeral(channel=user_id, user=user_id, text=f"Moved to {action.title()}.")
         elif action == "exp":

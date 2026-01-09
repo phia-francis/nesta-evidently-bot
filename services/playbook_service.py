@@ -1,4 +1,6 @@
+import json
 import random
+from pathlib import Path
 
 
 class PlaybookService:
@@ -8,61 +10,12 @@ class PlaybookService:
     """
 
     def __init__(self):
-        self.methods = {
-            "interview": {
-                "name": "User Interviews",
-                "icon": "🗣️",
-                "difficulty": "Low",
-                "evidence_strength": "Low (Qualitative)",
-                "description": "One-on-one conversations to understand user needs, pains, and goals.",
-                "best_for": ["desirability", "problem_validation"],
-                "nesta_tip": (
-                    "Don't ask 'Would you use this?' Ask 'When was the last time you solved this problem?'"
-                    " (The Mom Test)."
-                ),
-            },
-            "fake_door": {
-                "name": "Fake Door (Smoke Test)",
-                "icon": "🚪",
-                "difficulty": "Medium",
-                "evidence_strength": "High (Behavioral)",
-                "description": (
-                    "Create a landing page or button for a feature that doesn't exist yet to measure click-through "
-                    "intent."
-                ),
-                "best_for": ["desirability", "demand"],
-                "nesta_tip": "Always inform the user afterwards that this was a test and offer to notify them when it launches.",
-            },
-            "concierge": {
-                "name": "Concierge MVP",
-                "icon": "🛎️",
-                "difficulty": "High",
-                "evidence_strength": "Very High",
-                "description": "Manually performing the service for the user (behind the scenes) instead of building code.",
-                "best_for": ["viability", "feasibility"],
-                "nesta_tip": "Focus on learning the process flows before automating them.",
-            },
-            "pre_mortem": {
-                "name": "Pre-Mortem",
-                "icon": "💀",
-                "difficulty": "Low",
-                "evidence_strength": "Medium (Strategic)",
-                "description": (
-                    "Assume the project has failed 6 months from now. Work backwards to determine what went wrong."
-                ),
-                "best_for": ["risk", "feasibility"],
-                "nesta_tip": "This helps break 'groupthink' and allows team members to voice concerns safely.",
-            },
-            "wizard_of_oz": {
-                "name": "Wizard of Oz",
-                "icon": "🧙‍♂️",
-                "difficulty": "High",
-                "evidence_strength": "High",
-                "description": "The front-end looks real, but humans are doing the work on the back-end.",
-                "best_for": ["feasibility", "viability"],
-                "nesta_tip": "Great for testing complex AI or algo-driven ideas without writing the algo.",
-            },
-        }
+        self.methods = self._load_methods()
+
+    def _load_methods(self) -> dict:
+        methods_path = Path(__file__).with_name("playbook_methods.json")
+        with methods_path.open(encoding="utf-8") as handle:
+            return json.load(handle)
 
     def get_recommendations(self, category: str):
         return [

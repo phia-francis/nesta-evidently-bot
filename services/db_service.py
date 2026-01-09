@@ -1,4 +1,5 @@
 import datetime as dt
+from collections import defaultdict
 from typing import Any, Dict, Optional
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine
@@ -55,6 +56,13 @@ class ProjectMember(Base):
     user_id = Column(String(255), index=True)
     role = Column(String(50), default="member")
     project = relationship("Project", back_populates="members")
+
+
+class UserState(Base):
+    __tablename__ = "user_states"
+
+    user_id = Column(String(255), primary_key=True)
+    current_project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
 
 
 class Assumption(Base):
@@ -159,14 +167,21 @@ class DbService:
             member = ProjectMember(project_id=project.id, user_id=user_id, role="owner")
             db.add(member)
             db.commit()
+            self._set_active_project(db, user_id, project.id)
             db.refresh(project)
             return project
 
     def get_active_project(self, user_id: str) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
-            membership = db.query(ProjectMember).filter(ProjectMember.user_id == user_id).first()
-            if not membership or not membership.project:
-                return None
+            state = db.query(UserState).filter(UserState.user_id == user_id).first()
+            if state and state.current_project_id:
+                project_id = state.current_project_id
+            else:
+                membership = db.query(ProjectMember).filter(ProjectMember.user_id == user_id).first()
+                if not membership or not membership.project:
+                    return None
+                project_id = membership.project_id
+                self._set_active_project(db, user_id, project_id)
 
             project = (
                 db.query(Project)
@@ -175,10 +190,15 @@ class DbService:
                     joinedload(Project.experiments),
                     joinedload(Project.members),
                 )
-                .filter(Project.id == membership.project_id)
+                .filter(Project.id == project_id)
                 .first()
             )
             return self._serialize_project(project) if project else None
+
+    def set_active_project(self, user_id: str, project_id: int) -> None:
+        with SessionLocal() as db:
+            self._set_active_project(db, user_id, project_id)
+            db.commit()
 
     def get_user_projects(self, user_id: str) -> list[dict]:
         with SessionLocal() as db:
@@ -254,13 +274,18 @@ class DbService:
     def get_session_results(self, session_id: int) -> Dict[int, Dict[str, int]]:
         with SessionLocal() as db:
             votes = db.query(DecisionVote).filter(DecisionVote.session_id == session_id).all()
-            results: Dict[int, Dict[str, int]] = {}
+            results: Dict[int, Dict[str, int]] = defaultdict(lambda: {"keep": 0, "kill": 0, "pivot": 0})
             for vote in votes:
-                if vote.assumption_id not in results:
-                    results[vote.assumption_id] = {"keep": 0, "kill": 0, "pivot": 0}
                 if vote.vote_type in results[vote.assumption_id]:
                     results[vote.assumption_id][vote.vote_type] += 1
-            return results
+            return dict(results)
+
+    def _set_active_project(self, db, user_id: str, project_id: int) -> None:
+        state = db.query(UserState).filter(UserState.user_id == user_id).first()
+        if not state:
+            state = UserState(user_id=user_id)
+            db.add(state)
+        state.current_project_id = project_id
 
     def _serialize_project(self, project: Project) -> Dict[str, Any]:
         return {
