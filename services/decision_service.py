@@ -1,4 +1,5 @@
-from slack_sdk.models.blocks import ActionsBlock, Button, HeaderBlock, SectionBlock
+from slack_sdk.models.blocks import ActionsBlock, DividerBlock, HeaderBlock, SectionBlock
+from slack_sdk.models.blocks.elements import Button
 
 from services.db_service import DbService
 
@@ -26,7 +27,7 @@ class DecisionRoomService:
         blocks = [
             HeaderBlock(text=f"🗳️ Decision Room: {project['name']}").to_dict(),
             SectionBlock(text="*Team Alignment Time!* Vote on which assumptions we should test next.").to_dict(),
-            {"type": "divider"},
+            DividerBlock().to_dict(),
         ]
 
         for assumption in assumptions:
@@ -61,7 +62,7 @@ class DecisionRoomService:
                     ]
                 ).to_dict()
             )
-            blocks.append({"type": "divider"})
+            blocks.append(DividerBlock().to_dict())
 
         blocks.append(
             ActionsBlock(

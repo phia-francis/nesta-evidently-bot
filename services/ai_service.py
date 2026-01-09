@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 _GEMINI_MODEL_NAME = "gemini-1.5-flash"
 _TEMPERATURE = 0.2
 
-_PII_REGEX = re.compile(r"([\w.-]+@[\w.-]+)|(\+?\d[\d\s-]{7,}\d)")
+_PII_REGEX = re.compile(
+    r"(\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)|(\+?\d[\d\s-]{7,}\d)"
+)
 
 
 class EvidenceAI:
@@ -26,19 +28,9 @@ class EvidenceAI:
     def redact_pii(text: str) -> str:
         return _PII_REGEX.sub("[redacted]", text)
 
-    @staticmethod
-    @staticmethod
-    def _redact_pii(text: str) -> str:
-        """Simple regex-based PII redaction before sending to AI."""
-        email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
-        phone_pattern = r"\b\d{3}[-. ]?\d{3}[-. ]?\d{4}\b"
-        text = re.sub(email_pattern, "[EMAIL_REDACTED]", text)
-        text = re.sub(phone_pattern, "[PHONE_REDACTED]", text)
-        return text
-
     async def analyze_thread_async(self, conversation_text: str) -> dict:
         """Async analysis wrapper with PII redaction and robust parsing."""
-        clean_text = self._redact_pii(conversation_text)
+        clean_text = self.redact_pii(conversation_text)
         prompt = f"""
         Act as a Senior Innovation Consultant. Analyse this Slack thread.
 
@@ -87,7 +79,7 @@ Case Studies: {knowledge_base.CASE_STUDIES}
 Keys: summary (string), key_decision (boolean), action_items (array of strings), emergent_assumptions (array of strings), assumptions (array of objects).
 Each assumption object must include: id (stable hash or slug), text, category (one of {Category.OPPORTUNITY.value}, {Category.CAPABILITY.value}, {Category.PROGRESS.value}), confidence_score (integer 0-100), status ("active" or "stale"), provenance_source (string e.g. meeting name), source_id (string identifier), last_verified_at (ISO8601 string or null).
 Conversation:
-{self._redact_pii(conversation_text)}
+{self.redact_pii(conversation_text)}
 {attachment_context}
 """
 
