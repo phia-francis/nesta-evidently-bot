@@ -187,6 +187,7 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
         try:
             confidence = max(0, min(100, int(confidence_text)))
         except ValueError:
+            logger.warning("Invalid confidence score input: '%s'. Defaulting to 0.", confidence_text)
             confidence = 0
         try:
             evidence = max(0, min(100, int(evidence_text)))
