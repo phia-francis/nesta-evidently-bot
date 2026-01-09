@@ -1,5 +1,10 @@
-from slack_sdk.models.blocks import ActionsBlock, DividerBlock, HeaderBlock, SectionBlock
-from slack_sdk.models.blocks import Button
+from slack_sdk.models.blocks import (
+    ActionsBlock,
+    DividerBlock,
+    HeaderBlock,
+    SectionBlock,
+)
+from slack_sdk.models.blocks.block_elements import Button
 
 from services.db_service import DbService
 
