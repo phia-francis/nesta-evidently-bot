@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 _GEMINI_MODEL_NAME = "gemini-1.5-flash"
 _TEMPERATURE = 0.2
 
-_PII_REGEX = re.compile(r"([\w.-]+@[\w.-]+)|(\+?\d[\d\s-]{7,}\d)")
+_PII_REGEX = re.compile(
+    r"(\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)|(\+?\d[\d\s-]{7,}\d)"
+)
 
 
 class EvidenceAI:
