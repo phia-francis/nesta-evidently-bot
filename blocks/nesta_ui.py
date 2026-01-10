@@ -31,6 +31,10 @@ class NestaUI:
         ).to_dict()
 
     @staticmethod
+    def context(text: str) -> dict:
+        return ContextBlock(elements=[{"type": "mrkdwn", "text": text}]).to_dict()
+
+    @staticmethod
     def progress_bar(current: int, total: int) -> dict:
         filled = "⬛"
         empty = "⬜"

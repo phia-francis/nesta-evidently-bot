@@ -6,12 +6,14 @@ from slack_sdk.models.blocks.block_elements import PlainTextInputElement, RadioB
 from blocks.nesta_ui import NestaUI
 
 
-class ProjectPhase(Enum):
-    DISCOVERY = ("Discovery (Understanding needs)", "Discovery")
-    ALPHA = ("Alpha (Testing solutions)", "Alpha")
-    BETA = ("Beta (Scaling)", "Beta")
+class ProjectStage(Enum):
+    DEFINE = ("Define (Understand needs)", "Define")
+    DEVELOP = ("Develop (Draft solutions)", "Develop")
+    REFINE = ("Refine (Test assumptions)", "Refine")
+    EVALUATE = ("Evaluate (Measure impact)", "Evaluate")
+    DIFFUSE = ("Diffuse (Scale learnings)", "Diffuse")
 
-    def __new__(cls, display_text: str, value: str) -> "ProjectPhase":
+    def __new__(cls, display_text: str, value: str) -> "ProjectStage":
         obj = object.__new__(cls)
         obj._value_ = value
         obj.display_text = display_text
@@ -84,13 +86,13 @@ def get_setup_step_2_modal(problem_statement: str) -> dict:
                 element=PlainTextInputElement(action_id="name_input"),
             ).to_dict(),
             InputBlock(
-                block_id="phase_block",
-                label={"type": "plain_text", "text": "Current Phase"},
+                block_id="stage_block",
+                label={"type": "plain_text", "text": "Current Stage"},
                 element=RadioButtonsElement(
-                    action_id="phase_input",
+                    action_id="stage_input",
                     options=[
-                        Option(text=PlainTextObject(text=phase.display_text), value=phase.value)
-                        for phase in ProjectPhase
+                        Option(text=PlainTextObject(text=stage.display_text), value=stage.value)
+                        for stage in ProjectStage
                     ],
                 ),
             ).to_dict(),

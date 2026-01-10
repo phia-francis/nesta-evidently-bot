@@ -110,7 +110,23 @@ Conversation:
             return response.text
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to generate experiment suggestions", exc_info=True)
-            return "Could not generate experiments right now."
+            return Config.AI_EXPERIMENT_FALLBACK
+
+    def generate_canvas_suggestion(self, section: str, context: str) -> str:
+        """Suggest a single canvas item for a given section and project context."""
+        prompt = (
+            "You are Evidently, Nesta's Test & Learn assistant. "
+            "Provide one concise canvas item for the section below. "
+            "Use British English and avoid jargon.\n"
+            f"Section: {section}\n"
+            f"Project context: {context}"
+        )
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            return response.text.strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to generate canvas suggestion", exc_info=True)
+            return Config.AI_CANVAS_FALLBACK
 
     def recommend_methods(self, stage: str, context: str) -> str:
         """Recommend Nesta Playbook methods with rationale and case studies."""
