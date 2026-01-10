@@ -9,7 +9,10 @@ class Config:
     SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
     SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
     SLACK_APP_TOKEN = os.environ["SLACK_APP_TOKEN"]
+    SLACK_APP_ID = os.environ.get("SLACK_APP_ID")
     GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
+    ASANA_TOKEN = os.environ.get("ASANA_TOKEN")
+    ASANA_WORKSPACE_ID = os.environ.get("ASANA_WORKSPACE_ID")
     # NEW: Standard Database URL
     DATABASE_URL = os.environ["DATABASE_URL"]
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")

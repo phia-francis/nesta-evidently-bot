@@ -1,11 +1,9 @@
 slack_bolt==1.18.0
-google-generativeai==0.3.0
+google-generativeai==0.3.2
 python-dotenv==1.0.0
+psycopg2-binary>=2.9.10
+SQLAlchemy>=2.0.36
 google-api-python-client==2.111.0
 google-auth==2.26.1
-google-auth-httplib2==0.2.0
-google-auth-oauthlib==1.2.0
-quickchart.io
-psycopg2-binary==2.9.10
-SQLAlchemy>=2.0.36
-aiohttp
+asana==3.2.2
+pandas==2.2.0

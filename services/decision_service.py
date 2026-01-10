@@ -24,7 +24,7 @@ class DecisionRoomService:
         assumptions = [
             assumption
             for assumption in project.get("assumptions", [])
-            if assumption.get("status") in ["suggested", "prioritized"]
+            if assumption.get("validation_status") != "Rejected"
         ]
 
         if not assumptions:
@@ -40,8 +40,7 @@ class DecisionRoomService:
             blocks.append(
                 SectionBlock(
                     text=(
-                        f"*{assumption['title']}* \n_{assumption['category']}_ "
-                        f"| Confidence: {assumption['confidence_score']}%"
+                        f"*{assumption['title']}* \nStatus: {assumption['validation_status']}"
                     )
                 ).to_dict()
             )
