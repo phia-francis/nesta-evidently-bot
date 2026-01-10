@@ -3,7 +3,7 @@ import logging
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, inspect
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import declarative_base, joinedload, relationship, sessionmaker
 
@@ -151,8 +151,31 @@ class DbService:
             # ⚠️ TEMPORARY: Uncomment once to reset DB for new schema, then comment out.
             # Base.metadata.drop_all(bind=engine)
             Base.metadata.create_all(bind=engine)
+            self._log_schema_status()
         except Exception as exc:  # noqa: BLE001
             logging.warning("Unable to initialize database schema: %s", exc, exc_info=True)
+
+    def _log_schema_status(self) -> None:
+        inspector = inspect(engine)
+        expected_tables = {
+            "projects": {"stage", "integrations", "channel_id"},
+            "assumptions": {"validation_status", "evidence_density"},
+            "canvas_items": {"section", "text", "ai_generated"},
+        }
+        missing = []
+        for table, required_cols in expected_tables.items():
+            if table not in inspector.get_table_names():
+                missing.append(f"{table} (missing table)")
+                continue
+            existing_cols = {col["name"] for col in inspector.get_columns(table)}
+            for col in required_cols:
+                if col not in existing_cols:
+                    missing.append(f"{table}.{col}")
+        if missing:
+            logging.warning(
+                "Database schema appears outdated. Missing: %s. Run a migration or reset the DB before use.",
+                ", ".join(missing),
+            )
 
     def create_project(
         self,
@@ -313,7 +336,7 @@ class DbService:
             assumption.lane = lane
             db.commit()
 
-    def update_assumption_status(self, assumption_id: int, status: str) -> None:
+    def update_assumption_validation_status(self, assumption_id: int, status: str) -> None:
         with SessionLocal() as db:
             assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
             if not assumption:

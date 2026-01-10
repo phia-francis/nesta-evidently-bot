@@ -23,6 +23,14 @@ class Config:
     CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", 0.8))
     STALE_DAYS = int(os.environ.get("STALE_DAYS", 14))
     NESTA_TIP_ICON_URL = os.environ.get("NESTA_TIP_ICON_URL", "https://emojicdn.elk.sh/💡")
+    AI_CANVAS_FALLBACK = os.environ.get(
+        "AI_CANVAS_FALLBACK",
+        "We need to validate this area with more evidence.",
+    )
+    AI_EXPERIMENT_FALLBACK = os.environ.get(
+        "AI_EXPERIMENT_FALLBACK",
+        "Unable to generate experiments right now.",
+    )
 
 
 class Brand:

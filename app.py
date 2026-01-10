@@ -198,21 +198,7 @@ def refresh_home(ack, body, client):  # noqa: ANN001
     publish_home_tab(client, user_id)
 
 
-@app.action("nav_overview")
-@app.action("nav_discovery")
-@app.action("nav_roadmap")
-@app.action("nav_experiments")
-@app.action("nav_team")
-@app.action("tab_discovery_canvas")
-@app.action("tab_discovery_insights")
-@app.action("tab_discovery_questions")
-@app.action("tab_roadmap_main")
-@app.action("tab_roadmap_collections")
-@app.action("tab_experiments_framework")
-@app.action("tab_experiments_active")
-@app.action("tab_team_decision")
-@app.action("tab_team_integrations")
-@app.action("tab_team_automation")
+@app.action(re.compile(r"^(nav|tab)_"))
 def handle_navigation(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
@@ -324,13 +310,8 @@ def open_assumption_modal(client, trigger_id: str) -> None:
 
 
 @app.action("open_create_assumption")
-def open_create_assumption_modal(ack, body, client):  # noqa: ANN001
-    ack()
-    open_assumption_modal(client, body["trigger_id"])
-
-
 @app.action("open_add_assumption")
-def open_add_assumption(ack, body, client):  # noqa: ANN001
+def open_create_assumption_modal(ack, body, client):  # noqa: ANN001
     ack()
     open_assumption_modal(client, body["trigger_id"])
 
@@ -375,12 +356,14 @@ def handle_ai_canvas(ack, body, client):  # noqa: ANN001
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
         return
+    channel_id = body.get("channel", {}).get("id", user_id)
     client.chat_postEphemeral(
-        channel=body["channel"]["id"],
+        channel=channel_id,
         user=user_id,
         text=f"🧠 AI is brainstorming for '{section}'...",
     )
-    suggestion = "Residents lack secure access to bin stores."
+    context = f"{project['name']} — {project.get('description', '').strip()}"
+    suggestion = ai_service.generate_canvas_suggestion(section, context)
     db_service.add_canvas_item(project["id"], section, suggestion, is_ai=True)
     publish_home_tab(client, user_id, "discovery:canvas")
 
@@ -732,40 +715,27 @@ def confirm_experiment_method(ack, body, client):  # noqa: ANN001
 @app.action("ai_recommend_experiments")
 def handle_ai_experiments(ack, body, client):  # noqa: ANN001
     ack()
-    suggestions = [
-        {"title": "SMS Reminder Trial", "method": "Fake Door", "kpi": "Click Rate"},
-        {"title": "Bin Store Observation", "method": "Ethnography", "kpi": "Error Rate"},
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    context = f"Project: {project['name']}\nStage: {project['stage']}\nCanvas: {project.get('canvas_items', [])}"
+    suggestions = ai_service.generate_experiment_suggestions(context)
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "AI recommended experiments based on your current context:",
+            },
+        },
+        {"type": "divider"},
+        {"type": "section", "text": {"type": "mrkdwn", "text": suggestions}},
     ]
-    blocks = []
-    for suggestion in suggestions:
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*{suggestion['title']}*\nMethod: {suggestion['method']}",
-                },
-                "accessory": {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "Accept"},
-                    "value": suggestion["title"],
-                    "action_id": "accept_experiment",
-                },
-            }
-        )
     client.views_open(
         trigger_id=body["trigger_id"],
         view={"type": "modal", "title": {"type": "plain_text", "text": "AI Suggestions"}, "blocks": blocks},
-    )
-
-
-@app.action("accept_experiment")
-def handle_accept_experiment(ack, body, client):  # noqa: ANN001
-    ack()
-    client.chat_postEphemeral(
-        channel=body["user"]["id"],
-        user=body["user"]["id"],
-        text="Experiment added to your backlog.",
     )
 
 
@@ -836,12 +806,12 @@ def handle_nudge_action(ack, body, client, logger):  # noqa: ANN001
                 text=f"Generating experiment for assumption {assumption_id}...",
             )
         elif action_type == "val":
-            db_service.update_assumption_status(int(assumption_id), "Validated")
+            db_service.update_assumption_validation_status(int(assumption_id), "Validated")
             client.chat_postEphemeral(
                 channel=body["channel_id"], user=user_id, text=f"Assumption {assumption_id} marked as validated."
             )
         elif action_type == "arch":
-            db_service.update_assumption_status(int(assumption_id), "Rejected")
+            db_service.update_assumption_validation_status(int(assumption_id), "Rejected")
             client.chat_postEphemeral(
                 channel=body["channel_id"], user=user_id, text=f"Assumption {assumption_id} archived."
             )
@@ -860,7 +830,7 @@ def handle_keep(ack, body, client, logger):  # noqa: ANN001
     try:
         user_id = body["user"]["id"]
         assumption_id = body["actions"][0]["value"]
-        db_service.update_assumption_status(int(assumption_id), "Validated")
+        db_service.update_assumption_validation_status(int(assumption_id), "Validated")
         client.chat_postMessage(channel=user_id, text=f"✅ Assumption {assumption_id} marked as validated.")
     except Exception as exc:  # noqa: BLE001
         logger.error("Error in handle_keep action: %s", exc, exc_info=True)
@@ -872,7 +842,7 @@ def handle_archive(ack, body, client, logger):  # noqa: ANN001
     try:
         user_id = body["user"]["id"]
         assumption_id = body["actions"][0]["value"]
-        db_service.update_assumption_status(int(assumption_id), "Rejected")
+        db_service.update_assumption_validation_status(int(assumption_id), "Rejected")
         client.chat_postMessage(channel=user_id, text=f"🗑️ Assumption {assumption_id} marked as rejected.")
     except Exception as exc:  # noqa: BLE001
         logger.error("Error in handle_archive action: %s", exc, exc_info=True)

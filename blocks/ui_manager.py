@@ -2,6 +2,11 @@ from typing import Any
 
 
 class UIManager:
+    _VELOCITY_THRESHOLDS = (
+        (5, "High 🚀"),
+        (2, "Moderate 🟢"),
+        (0, "Low 🟠"),
+    )
     @staticmethod
     def get_home_view(
         user_id: str,
@@ -149,7 +154,7 @@ class UIManager:
                         "text": {"type": "plain_text", "text": "Canvas"},
                         "value": "discovery:canvas",
                         "action_id": "tab_discovery_canvas",
-                        "style": "primary" if subtab == "canvas" else "default",
+                        "style": "primary" if subtab in ("", "canvas") else "default",
                     },
                     {
                         "type": "button",
@@ -434,6 +439,7 @@ class UIManager:
     def _render_insights(metrics: dict[str, int]) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         blocks.append({"type": "header", "text": {"type": "plain_text", "text": "📊 Insights & reporting"}})
+        velocity_label = UIManager._learning_velocity_label(metrics)
         blocks.append(
             {
                 "type": "section",
@@ -441,7 +447,7 @@ class UIManager:
                     {"type": "mrkdwn", "text": f"*Experiments Run:*\n{metrics['experiments']}"},
                     {"type": "mrkdwn", "text": f"*Validated Assumptions:*\n{metrics['validated']}"},
                     {"type": "mrkdwn", "text": f"*Rejected Hypotheses:*\n{metrics['rejected']}"},
-                    {"type": "mrkdwn", "text": "*Learning velocity:*\nHigh 🚀"},
+                    {"type": "mrkdwn", "text": f"*Learning velocity:*\n{velocity_label}"},
                 ],
             }
         )
@@ -467,6 +473,14 @@ class UIManager:
             }
         )
         return blocks
+
+    @staticmethod
+    def _learning_velocity_label(metrics: dict[str, int]) -> str:
+        experiments = metrics.get("experiments", 0)
+        for threshold, label in UIManager._VELOCITY_THRESHOLDS:
+            if experiments >= threshold:
+                return label
+        return "Low 🟠"
 
     @staticmethod
     def _render_team(project: dict[str, Any], subtab: str) -> list[dict[str, Any]]:
@@ -542,21 +556,33 @@ class UIManager:
         integrations = project.get("integrations") or {}
         blocks.append({"type": "header", "text": {"type": "plain_text", "text": "🔗 Integrations"}})
 
-        drive_status = "✅ Connected" if integrations.get("drive", {}).get("connected") else "⚪ Disconnected"
+        drive_connected = integrations.get("drive", {}).get("connected")
+        drive_status = "✅ Connected" if drive_connected else "⚪ Disconnected"
+        drive_action_text = "Manage" if drive_connected else "Connect"
         blocks.append(
             {
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": f"*Google Drive*\n{drive_status}"},
-                "accessory": {"type": "button", "text": {"type": "plain_text", "text": "Connect"}, "action_id": "connect_drive"},
+                "accessory": {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": drive_action_text},
+                    "action_id": "connect_drive",
+                },
             }
         )
 
-        asana_status = "✅ Connected" if integrations.get("asana", {}).get("connected") else "⚪ Disconnected"
+        asana_connected = integrations.get("asana", {}).get("connected")
+        asana_status = "✅ Connected" if asana_connected else "⚪ Disconnected"
+        asana_action_text = "Manage" if asana_connected else "Connect"
         blocks.append(
             {
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": f"*Asana*\n{asana_status}"},
-                "accessory": {"type": "button", "text": {"type": "plain_text", "text": "Connect"}, "action_id": "connect_asana"},
+                "accessory": {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": asana_action_text},
+                    "action_id": "connect_asana",
+                },
             }
         )
         return blocks

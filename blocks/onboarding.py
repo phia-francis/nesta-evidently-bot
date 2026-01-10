@@ -13,7 +13,7 @@ class ProjectStage(Enum):
     EVALUATE = ("Evaluate (Measure impact)", "Evaluate")
     DIFFUSE = ("Diffuse (Scale learnings)", "Diffuse")
 
-    def __new__(cls, display_text: str, value: str) -> "ProjectPhase":
+    def __new__(cls, display_text: str, value: str) -> "ProjectStage":
         obj = object.__new__(cls)
         obj._value_ = value
         obj.display_text = display_text
