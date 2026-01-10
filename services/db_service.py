@@ -105,9 +105,13 @@ class Assumption(Base):
     lane = Column(String(50), default="Now")
     validation_status = Column(String(50), default="Testing")
     evidence_density = Column(Integer, default=0)
+    source_type = Column(String(50))
+    source_id = Column(String(255))
+    source_snippet = Column(Text)
+    confidence_score = Column(Integer, default=0)
 
     project = relationship("Project", back_populates="assumptions")
-    votes = relationship("DecisionVote", back_populates="assumption")
+    scores = relationship("DecisionScore", back_populates="assumption")
 
 
 class DecisionSession(Base):
@@ -121,21 +125,26 @@ class DecisionSession(Base):
     created_at = Column(DateTime, default=dt.datetime.utcnow)
 
     project = relationship("Project", back_populates="decisions")
-    votes = relationship("DecisionVote", back_populates="session")
+    scores = relationship("DecisionScore", back_populates="session")
 
 
-class DecisionVote(Base):
-    __tablename__ = "decision_votes"
+class DecisionScore(Base):
+    """Supports Silent Scoring with multi-criteria ratings."""
+
+    __tablename__ = "decision_scores"
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(Integer, ForeignKey("decision_sessions.id"))
     assumption_id = Column(Integer, ForeignKey("assumptions.id"))
     user_id = Column(String(255))
 
-    vote_type = Column(String(50))
-    value_score = Column(Integer, nullable=True)
+    impact = Column(Integer)
+    uncertainty = Column(Integer)
+    feasibility = Column(Integer)
+    confidence = Column(Integer)
+    rationale = Column(Text)
 
-    session = relationship("DecisionSession", back_populates="votes")
-    assumption = relationship("Assumption", back_populates="votes")
+    session = relationship("DecisionSession", back_populates="scores")
+    assumption = relationship("Assumption", back_populates="scores")
 
 
 class UserState(Base):
@@ -159,7 +168,7 @@ class DbService:
         inspector = inspect(engine)
         expected_tables = {
             "projects": {"stage", "integrations", "channel_id"},
-            "assumptions": {"validation_status", "evidence_density"},
+            "assumptions": {"validation_status", "evidence_density", "source_type", "source_id", "confidence_score"},
             "canvas_items": {"section", "text", "ai_generated"},
         }
         missing = []
@@ -322,6 +331,10 @@ class DbService:
                 lane=data.get("lane", "Now"),
                 validation_status=data.get("validation_status", "Testing"),
                 evidence_density=data.get("evidence_density", 0),
+                source_type=data.get("source_type"),
+                source_id=data.get("source_id"),
+                source_snippet=data.get("source_snippet"),
+                confidence_score=data.get("confidence_score", 0),
             )
             db.add(assumption)
             db.commit()
@@ -357,28 +370,41 @@ class DbService:
             db.refresh(session)
             return session.id
 
-    def cast_vote(self, session_id: int, assumption_id: int, user_id: str, vote_type: str) -> None:
+    def record_decision_score(
+        self,
+        session_id: int,
+        assumption_id: int,
+        user_id: str,
+        impact: int,
+        uncertainty: int,
+        feasibility: int,
+        confidence: int,
+        rationale: str | None = None,
+    ) -> None:
         with SessionLocal() as db:
-            vote = (
-                db.query(DecisionVote)
+            score = (
+                db.query(DecisionScore)
                 .filter_by(session_id=session_id, assumption_id=assumption_id, user_id=user_id)
                 .first()
             )
 
-            if not vote:
-                vote = DecisionVote(session_id=session_id, assumption_id=assumption_id, user_id=user_id)
-                db.add(vote)
+            if not score:
+                score = DecisionScore(session_id=session_id, assumption_id=assumption_id, user_id=user_id)
+                db.add(score)
 
-            vote.vote_type = vote_type
+            score.impact = impact
+            score.uncertainty = uncertainty
+            score.feasibility = feasibility
+            score.confidence = confidence
+            score.rationale = rationale
             db.commit()
 
-    def get_session_results(self, session_id: int) -> Dict[int, Dict[str, int]]:
+    def get_session_scores(self, session_id: int) -> Dict[int, list[DecisionScore]]:
         with SessionLocal() as db:
-            votes = db.query(DecisionVote).filter(DecisionVote.session_id == session_id).all()
-            results: Dict[int, Dict[str, int]] = defaultdict(lambda: {"keep": 0, "kill": 0, "pivot": 0})
-            for vote in votes:
-                if vote.vote_type in results[vote.assumption_id]:
-                    results[vote.assumption_id][vote.vote_type] += 1
+            scores = db.query(DecisionScore).filter(DecisionScore.session_id == session_id).all()
+            results: Dict[int, list[DecisionScore]] = defaultdict(list)
+            for score in scores:
+                results[score.assumption_id].append(score)
             return dict(results)
 
     def _set_active_project(self, db, user_id: str, project_id: int) -> None:
@@ -427,4 +453,8 @@ class DbService:
             "lane": assumption.lane,
             "validation_status": assumption.validation_status,
             "evidence_density": assumption.evidence_density,
+            "source_type": assumption.source_type,
+            "source_id": assumption.source_id,
+            "source_snippet": assumption.source_snippet,
+            "confidence_score": assumption.confidence_score,
         }

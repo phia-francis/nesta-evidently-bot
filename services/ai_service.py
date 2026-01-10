@@ -6,7 +6,7 @@ from typing import Iterable
 
 import google.generativeai as genai
 
-from config import Category, Config
+from config import Config
 from services import knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -72,12 +72,33 @@ class EvidenceAI:
             attachment_context = "\nAttachments available:\n" + "\n".join(formatted)
 
         prompt = f"""
-You are Evidently, Nesta's Test & Learn assistant. Respond in strict JSON using British English for free text.
-Reference Playbook: {knowledge_base.FRAMEWORK_STAGES}
-Methods Toolkit: {knowledge_base.METHODS_TOOLKIT}
-Case Studies: {knowledge_base.CASE_STUDIES}
-Keys: summary (string), key_decision (boolean), action_items (array of strings), emergent_assumptions (array of strings), assumptions (array of objects).
-Each assumption object must include: id (stable hash or slug), text, category (one of {Category.OPPORTUNITY.value}, {Category.CAPABILITY.value}, {Category.PROGRESS.value}), confidence_score (integer 0-100), status ("active" or "stale"), provenance_source (string e.g. meeting name), source_id (string identifier), last_verified_at (ISO8601 string or null).
+You are Evidently, an innovation assistant. Analyse this thread.
+
+TASK 1: "SO WHAT?" SUMMARY
+Provide a single, punchy sentence explaining the practical implication of this discussion.
+Format: "We agreed to [ACTION] because [RATIONALE], which unlocks [OUTCOME]."
+
+TASK 2: EXTRACT ASSUMPTIONS
+Identify assumptions mapping to the OCP framework (Opportunity, Capability, Progress).
+For each, assign a confidence score (0-100) based on evidence mentioned, not just sentiment.
+
+TASK 3: PROVENANCE
+Identify the source of the insight. If a specific document or user stated it, quote them.
+
+RETURN JSON ONLY.
+{{
+    "so_what_summary": "string",
+    "assumptions": [
+        {{
+            "text": "string",
+            "category": "Opportunity|Capability|Progress",
+            "confidence_score": int,
+            "evidence_snippet": "string",
+            "source_user": "string"
+        }}
+    ]
+}}
+
 Conversation:
 {self.redact_pii(conversation_text)}
 {attachment_context}
@@ -89,6 +110,7 @@ Conversation:
             parsed = json.loads(response_text)
             for assumption in parsed.get("assumptions", []):
                 assumption["text"] = self.redact_pii(assumption.get("text", ""))
+                assumption["evidence_snippet"] = self.redact_pii(assumption.get("evidence_snippet", ""))
             return parsed
         except json.JSONDecodeError as exc:
             logger.error("AI Analysis - Failed to parse JSON", exc_info=True)

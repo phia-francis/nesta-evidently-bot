@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import uuid
 from typing import Iterable, List
 
-from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from config import Config
+from services.google_auth_service import get_google_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +30,13 @@ class GoogleWorkspaceService:
 
     @staticmethod
     def _get_credentials():
-        json_str = Config.GOOGLE_SERVICE_ACCOUNT_JSON
-        if not json_str:
-            raise ValueError("Missing GOOGLE_SERVICE_ACCOUNT_JSON in environment.")
-        info = json.loads(json_str)
         scopes = [
             GoogleWorkspaceService.DOCS_SCOPE,
             GoogleWorkspaceService.SHEETS_SCOPE,
             GoogleWorkspaceService.SLIDES_SCOPE,
             GoogleWorkspaceService.GMAIL_SCOPE,
         ]
-        return service_account.Credentials.from_service_account_info(info, scopes=scopes)
+        return get_google_credentials(scopes, require=True)
 
     def create_doc(self, title: str, content: str) -> str | None:
         try:
