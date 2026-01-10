@@ -144,6 +144,8 @@ class DecisionVote(Base):
     session = relationship("DecisionSession", back_populates="votes")
     assumption = relationship("Assumption", back_populates="votes")
 
+# ⚠️ TEMPORARY FIX: Drop old tables to force schema update
+Base.metadata.drop_all(bind=engine)
 
 # Create Tables
 Base.metadata.create_all(bind=engine)
