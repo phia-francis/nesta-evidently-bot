@@ -1,5 +1,7 @@
 from typing import Any
 
+from blocks.ui_strings import DEFAULT_STAGE_DESCRIPTION, DISCOVERY_WORKSPACE_TITLE, NAV_BUTTONS
+
 
 class UIManager:
     _VELOCITY_THRESHOLDS = (
@@ -23,7 +25,7 @@ class UIManager:
 
         metrics = metrics or {"experiments": 0, "validated": 0, "rejected": 0}
         stage_info = stage_info or {
-            "desc": "Define the problem and stakeholder needs.",
+            "desc": DEFAULT_STAGE_DESCRIPTION,
             "methods": [],
             "case_study": "",
         }
@@ -102,14 +104,7 @@ class UIManager:
     def _nav_buttons(active_tab: str) -> list[dict[str, Any]]:
         buttons = []
         workspace, _ = UIManager._parse_tab(active_tab)
-        for label, value, action_id in [
-            ("1️⃣ Overview", "overview", "nav_overview"),
-            ("2️⃣ Discovery", "discovery", "nav_discovery"),
-            ("3️⃣ Roadmap", "roadmap", "nav_roadmap"),
-            ("4️⃣ Experiments", "experiments", "nav_experiments"),
-            ("5️⃣ Team", "team", "nav_team"),
-            ("❓ Help", "help", "nav_help"),
-        ]:
+        for label, value, action_id in NAV_BUTTONS:
             button = {
                 "type": "button",
                 "text": {"type": "plain_text", "text": label},
@@ -171,7 +166,7 @@ class UIManager:
         metrics: dict[str, int],
     ) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Discovery workspace*"}})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": DISCOVERY_WORKSPACE_TITLE}})
         blocks.append(
             {
                 "type": "actions",

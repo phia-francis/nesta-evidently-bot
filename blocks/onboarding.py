@@ -53,6 +53,7 @@ def get_setup_step_1_modal() -> dict:
         "type": "modal",
         "callback_id": "setup_step_2_submit",
         "title": {"type": "plain_text", "text": "Step 1: The Problem"},
+        "close": {"type": "plain_text", "text": "Cancel"},
         "blocks": [
             NestaUI.progress_bar(1, 3),
             NestaUI.section("Every great project solves a real problem. Describe it simply."),
@@ -77,6 +78,7 @@ def get_setup_step_2_modal(problem_statement: str) -> dict:
         "callback_id": "setup_final_submit",
         "private_metadata": problem_statement,
         "title": {"type": "plain_text", "text": "Step 2: The Goal"},
+        "close": {"type": "plain_text", "text": "Cancel"},
         "blocks": [
             NestaUI.progress_bar(2, 3),
             NestaUI.section(f"You're solving: _{problem_statement}_"),

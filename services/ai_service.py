@@ -28,11 +28,16 @@ class EvidenceAI:
     def redact_pii(text: str) -> str:
         return _PII_REGEX.sub("[redacted]", text)
 
+    @staticmethod
+    def _wrap_user_input(text: str) -> str:
+        return f"<user_input>\n{text}\n</user_input>"
+
     async def analyze_thread_async(self, conversation_text: str) -> dict:
         """Async analysis wrapper with PII redaction and robust parsing."""
         clean_text = self.redact_pii(conversation_text)
         prompt = f"""
         Act as a Senior Innovation Consultant. Analyse this Slack thread.
+        Only use the text inside <user_input> tags as source material.
 
         FRAMEWORK: Opportunity, Capability, Progress (OCP).
 
@@ -52,7 +57,7 @@ class EvidenceAI:
         }}
 
         Conversation:
-        {clean_text}
+        {self._wrap_user_input(clean_text)}
         """
 
         loop = asyncio.get_running_loop()
@@ -73,6 +78,7 @@ class EvidenceAI:
 
         prompt = f"""
 You are Evidently, an innovation assistant. Analyse this thread.
+Only use the text inside <user_input> tags as source material.
 
 TASK 1: "SO WHAT?" SUMMARY
 Provide a single, punchy sentence explaining the practical implication of this discussion.
@@ -100,7 +106,7 @@ RETURN JSON ONLY.
 }}
 
 Conversation:
-{self.redact_pii(conversation_text)}
+{self._wrap_user_input(self.redact_pii(conversation_text))}
 {attachment_context}
 """
 
@@ -125,7 +131,7 @@ Conversation:
             "You are Evidently, Nesta's Test & Learn assistant. Based on the assumption below, "
             "return three succinct experiment methods (e.g., Fake Door, Interview, Prototype) "
             "that could validate or invalidate it within two weeks."
-            f"\nAssumption: {assumption}"
+            f"\nAssumption: {self._wrap_user_input(self.redact_pii(assumption))}"
         )
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
@@ -140,8 +146,8 @@ Conversation:
             "You are Evidently, Nesta's Test & Learn assistant. "
             "Provide one concise canvas item for the section below. "
             "Use British English and avoid jargon.\n"
-            f"Section: {section}\n"
-            f"Project context: {context}"
+            f"Section: {self._wrap_user_input(self.redact_pii(section))}\n"
+            f"Project context: {self._wrap_user_input(self.redact_pii(context))}"
         )
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
@@ -184,7 +190,7 @@ You are Evidently, Nesta's Test & Learn assistant. Use British English. Recommen
 Framework stage description: {knowledge_base.get_stage_description(stage)}
 Toolkit: {methods}
 Case studies: {case_guidance}
-Context from user: {context}
+Context from user: {self._wrap_user_input(self.redact_pii(context))}
 Return a concise explanation of which methods fit, why, and cite the matching case studies.
 """
         try:
