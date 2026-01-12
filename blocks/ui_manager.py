@@ -19,6 +19,7 @@ class UIManager:
         metrics: dict[str, int] | None = None,
         stage_info: dict[str, Any] | None = None,
         next_best_actions: list[str] | None = None,
+        experiment_page: int = 0,
     ) -> dict:
         if not project:
             return UIManager._get_onboarding_view()
@@ -73,7 +74,9 @@ class UIManager:
         workspace, subtab = UIManager._parse_tab(active_tab)
 
         if workspace == "overview":
-            blocks.extend(UIManager._render_overview_workspace(project, metrics, next_best_actions))
+            blocks.extend(
+                UIManager._render_overview_workspace(project, metrics, next_best_actions, experiment_page)
+            )
         elif workspace == "discovery":
             blocks.extend(UIManager._render_discovery_workspace(project, subtab, metrics))
         elif workspace == "roadmap":
@@ -128,9 +131,23 @@ class UIManager:
         project: dict[str, Any],
         metrics: dict[str, int],
         next_best_actions: list[str] | None,
+        experiment_page: int,
     ) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Project Health & Metrics*"}})
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "Last updated: just now"}],
+            }
+        )
+        confidence_score = int(project.get("confidence_score", 0))
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Project Score:*\n{UIManager._progress_bar(confidence_score)}"},
+            }
+        )
         blocks.append(
             {
                 "type": "section",
@@ -142,6 +159,91 @@ class UIManager:
                 ],
             }
         )
+        blocks.append({"type": "divider"})
+
+        experiments = project.get("experiments", [])
+        active_experiments = [exp for exp in experiments if exp.get("status") not in {"Completed", "Archived"}]
+        completed_experiments = [exp for exp in experiments if exp.get("status") in {"Completed", "Archived"}]
+        blocks.append({"type": "header", "text": {"type": "plain_text", "text": "🧪 Experiments"}})
+
+        page_size = 5
+        total_pages = max(1, (len(active_experiments) + page_size - 1) // page_size)
+        page = max(0, min(experiment_page, total_pages - 1))
+        start = page * page_size
+        end = start + page_size
+        paged_experiments = active_experiments[start:end]
+
+        if paged_experiments:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Active*"}})
+            for experiment in paged_experiments:
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"*{experiment.get('title', 'Untitled')}* — {experiment.get('status', 'Planning')}",
+                        },
+                        "accessory": {
+                            "type": "overflow",
+                            "action_id": "experiment_overflow",
+                            "options": [
+                                {
+                                    "text": {"type": "plain_text", "text": "Edit"},
+                                    "value": f"edit:{experiment['id']}",
+                                },
+                                {
+                                    "text": {"type": "plain_text", "text": "Archive"},
+                                    "value": f"archive:{experiment['id']}",
+                                },
+                                {
+                                    "text": {"type": "plain_text", "text": "Sync to Asana"},
+                                    "value": f"sync:{experiment['id']}",
+                                },
+                            ],
+                        },
+                    }
+                )
+        else:
+            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "No active experiments yet."}]})
+
+        if completed_experiments:
+            blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Completed*"}})
+            for experiment in completed_experiments[:3]:
+                blocks.append(
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"✅ {experiment.get('title', 'Untitled')} ({experiment.get('status', 'Completed')})",
+                        },
+                    }
+                )
+        if total_pages > 1:
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Previous"},
+                            "action_id": "experiments_page_prev",
+                            "value": str(page - 1),
+                            "style": "primary" if page > 0 else "default",
+                        },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Next"},
+                            "action_id": "experiments_page_next",
+                            "value": str(page + 1),
+                            "style": "primary" if page < total_pages - 1 else "default",
+                        },
+                    ],
+                }
+            )
+        blocks.append(
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": "View all experiments in the Experiments tab."}]}
+        )
+
         blocks.append({"type": "divider"})
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*✨ AI Next Best Actions*"}})
         if next_best_actions:
@@ -158,6 +260,12 @@ class UIManager:
             }
         )
         return blocks
+
+    @staticmethod
+    def _progress_bar(score: int) -> str:
+        blocks = 5
+        filled = min(blocks, max(0, round(score / 20)))
+        return "🟩" * filled + "⬜" * (blocks - filled)
 
     @staticmethod
     def _render_discovery_workspace(
@@ -423,10 +531,22 @@ class UIManager:
                                 ),
                             },
                             "accessory": {
-                                "type": "button",
-                                "text": {"type": "plain_text", "text": "Update"},
-                                "value": str(experiment["id"]),
-                                "action_id": "update_experiment",
+                                "type": "overflow",
+                                "action_id": "experiment_overflow",
+                                "options": [
+                                    {
+                                        "text": {"type": "plain_text", "text": "Edit"},
+                                        "value": f"edit:{experiment['id']}",
+                                    },
+                                    {
+                                        "text": {"type": "plain_text", "text": "Archive"},
+                                        "value": f"archive:{experiment['id']}",
+                                    },
+                                    {
+                                        "text": {"type": "plain_text", "text": "Sync to Asana"},
+                                        "value": f"sync:{experiment['id']}",
+                                    },
+                                ],
                             },
                         }
                     )
@@ -508,6 +628,11 @@ class UIManager:
                         "text": {"type": "plain_text", "text": "💾 Export CSV"},
                         "value": "csv",
                         "action_id": "export_report",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "📢 Broadcast Update"},
+                        "action_id": "broadcast_update",
                     },
                 ],
             }

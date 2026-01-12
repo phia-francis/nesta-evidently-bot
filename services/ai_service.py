@@ -199,3 +199,135 @@ Return a concise explanation of which methods fit, why, and cite the matching ca
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to recommend methods", exc_info=True)
             return "Unable to recommend methods right now."
+
+    def scout_market(self, problem_statement: str, region: str = "Global") -> dict:
+        """Generate a competitor scan and market risks for a problem statement.
+
+        Args:
+            problem_statement: The core problem statement.
+            region: Target region for competitor discovery (e.g., UK, US, Global).
+        """
+        prompt = f"""
+Act as a Venture Capital Analyst focusing on the {region} market.
+My problem statement is: "{problem_statement}"
+
+1. Identify 5 potential competitors (real companies or startups) that solve this.
+2. Identify 3 major 'Market Risks' (e.g., Regulatory, Adoption, Tech).
+
+Return JSON only with keys: "competitors" (list of strings), "risks" (list of strings).
+"""
+        response_text = ""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            response_text = response.text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(response_text)
+            competitors = [str(item).strip() for item in parsed.get("competitors", []) if item]
+            risks = [str(item).strip() for item in parsed.get("risks", []) if item]
+            return {"competitors": competitors, "risks": risks}
+        except Exception:  # noqa: BLE001
+            logger.error("Failed to scout market insights", exc_info=True)
+            return {"competitors": [], "risks": [], "raw": response_text}
+
+    def summarize_thread(self, messages: list[str]) -> str:
+        """Summarize recent thread messages for project context.
+
+        Args:
+            messages: List of message strings to summarize.
+
+        Returns:
+            A concise summary string.
+        """
+        prompt = f"""
+You are Evidently. Summarize the last 20 messages into a short project context update.
+Return plain text only.
+
+Conversation:
+{self._wrap_user_input(self.redact_pii("\n".join(messages[:20])))}
+"""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            return response.text.strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to summarize thread", exc_info=True)
+            return "Unable to summarize recent activity."
+
+    def generate_canvas_from_doc(self, doc_text: str) -> dict:
+        """Extract canvas data, identify gaps, and propose follow-up questions.
+
+        Args:
+            doc_text: Raw document text.
+
+        Returns:
+            A dictionary containing canvas data, identified gaps, and follow-up questions.
+        """
+        prompt = f"""
+Analyse this project document:
+"{doc_text[:10000]}..."
+
+1. Extract canvas data:
+   - problem
+   - solution
+   - risks (3-5)
+   - users
+2. Critique the data and identify gaps (e.g., vague user segments, missing metrics).
+3. Generate 3 follow-up questions to clarify the gaps.
+
+Return JSON only in this format:
+{{
+  "canvas_data": {{
+    "problem": "...",
+    "solution": "...",
+    "risks": ["..."],
+    "users": ["..."]
+  }},
+  "gaps_identified": ["..."],
+  "follow_up_questions": ["...", "...", "..."]
+}}
+"""
+        response_text = ""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            response_text = response.text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(response_text)
+            canvas_data = parsed.get("canvas_data", {}) or {}
+            return {
+                "canvas_data": {
+                    "problem": str(canvas_data.get("problem", "")).strip(),
+                    "solution": str(canvas_data.get("solution", "")).strip(),
+                    "risks": [str(item).strip() for item in canvas_data.get("risks", []) if item],
+                    "users": [str(item).strip() for item in canvas_data.get("users", []) if item],
+                },
+                "gaps_identified": [str(item).strip() for item in parsed.get("gaps_identified", []) if item],
+                "follow_up_questions": [
+                    str(item).strip() for item in parsed.get("follow_up_questions", []) if item
+                ],
+                "raw": response_text,
+            }
+        except Exception:  # noqa: BLE001
+            logger.error("Failed to generate canvas from document", exc_info=True)
+            return {
+                "canvas_data": {"problem": "", "solution": "", "risks": [], "users": []},
+                "gaps_identified": [],
+                "follow_up_questions": [],
+                "raw": response_text,
+            }
+
+    def extract_action_items(self, conversation_text: str) -> list[str]:
+        """Extract action items from recent conversation."""
+        prompt = f"""
+You are Evidently, an innovation assistant. Extract up to five action items from the text.
+Return JSON only as a list of short action strings.
+
+Conversation:
+{self._wrap_user_input(self.redact_pii(conversation_text))}
+"""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            response_text = response.text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(response_text)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if item]
+            return []
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to extract action items", exc_info=True)
+            return []
