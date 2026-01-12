@@ -15,6 +15,7 @@ class UIManager:
         active_tab: str = "overview",
         metrics: dict[str, int] | None = None,
         stage_info: dict[str, Any] | None = None,
+        next_best_actions: list[str] | None = None,
     ) -> dict:
         if not project:
             return UIManager._get_onboarding_view()
@@ -38,7 +39,7 @@ class UIManager:
         workspace, subtab = UIManager._parse_tab(active_tab)
 
         if workspace == "overview":
-            blocks.extend(UIManager._render_overview_workspace(project, metrics))
+            blocks.extend(UIManager._render_overview_workspace(project, metrics, next_best_actions))
         elif workspace == "discovery":
             blocks.extend(UIManager._render_discovery_workspace(project, subtab, metrics))
         elif workspace == "roadmap":
@@ -80,7 +81,11 @@ class UIManager:
         return active_tab, ""
 
     @staticmethod
-    def _render_overview_workspace(project: dict[str, Any], metrics: dict[str, int]) -> list[dict[str, Any]]:
+    def _render_overview_workspace(
+        project: dict[str, Any],
+        metrics: dict[str, int],
+        next_best_actions: list[str] | None,
+    ) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Project Health & Metrics*"}})
         blocks.append(
@@ -96,20 +101,16 @@ class UIManager:
         )
         blocks.append({"type": "divider"})
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*✨ AI Next Best Actions*"}})
+        if next_best_actions:
+            actions_text = "\n".join([f"• {action}" for action in next_best_actions])
+        else:
+            actions_text = "No recommendations available yet."
         blocks.append(
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": (
-                        "• *High Uncertainty:* 3 assumptions in 'Desirability' need testing.\n"
-                        "• *Stale Data:* Review the 'User Growth' experiment (2 weeks old)."
-                    ),
-                },
-                "accessory": {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "Open Inbox"},
-                    "action_id": "open_inbox",
+                    "text": actions_text,
                 },
             }
         )

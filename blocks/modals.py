@@ -56,31 +56,33 @@ def decision_room_modal() -> dict:
     }
 
 
+SCORE_OPTIONS = [
+    {"text": {"type": "plain_text", "text": f"{i} - {desc}"}, "value": str(i)}
+    for i, desc in [
+        (0, "None"),
+        (1, "Very Low"),
+        (2, "Low"),
+        (3, "Medium"),
+        (4, "High"),
+        (5, "Critical"),
+    ]
+]
+
+EVIDENCE_OPTIONS = [
+    {"text": {"type": "plain_text", "text": f"Level {i} - {desc}"}, "value": str(i)}
+    for i, desc in [
+        (0, "No evidence"),
+        (1, "Light evidence (Say)"),
+        (2, "Light action (Do)"),
+        (3, "Strong action (Do)"),
+        (4, "Market proof"),
+        (5, "Validated"),
+    ]
+]
+
+
 def silent_scoring_modal(assumption_title: str, session_id: int, assumption_id: int) -> dict:
     """Implements the Silent Scoring phase with multi-criteria ratings."""
-    score_options = [
-        {"text": {"type": "plain_text", "text": f"{i} - {desc}"}, "value": str(i)}
-        for i, desc in [
-            (0, "None"),
-            (1, "Very Low"),
-            (2, "Low"),
-            (3, "Medium"),
-            (4, "High"),
-            (5, "Critical"),
-        ]
-    ]
-
-    evidence_options = [
-        {"text": {"type": "plain_text", "text": f"Level {i} - {desc}"}, "value": str(i)}
-        for i, desc in [
-            (0, "No evidence"),
-            (1, "Light evidence (Say)"),
-            (2, "Light action (Do)"),
-            (3, "Strong action (Do)"),
-            (4, "Market proof"),
-            (5, "Validated"),
-        ]
-    ]
 
     return {
         "type": "modal",
@@ -102,8 +104,8 @@ def silent_scoring_modal(assumption_title: str, session_id: int, assumption_id: 
                 "element": {
                     "type": "static_select",
                     "action_id": "impact_score",
-                    "options": score_options,
-                    "initial_option": score_options[3],
+                    "options": SCORE_OPTIONS,
+                    "initial_option": SCORE_OPTIONS[3],
                 },
             },
             {
@@ -113,7 +115,7 @@ def silent_scoring_modal(assumption_title: str, session_id: int, assumption_id: 
                 "element": {
                     "type": "static_select",
                     "action_id": "uncertainty_score",
-                    "options": score_options,
+                    "options": SCORE_OPTIONS,
                 },
             },
             {
@@ -123,7 +125,7 @@ def silent_scoring_modal(assumption_title: str, session_id: int, assumption_id: 
                 "element": {
                     "type": "static_select",
                     "action_id": "feasibility_score",
-                    "options": score_options,
+                    "options": SCORE_OPTIONS,
                 },
             },
             {
@@ -133,8 +135,8 @@ def silent_scoring_modal(assumption_title: str, session_id: int, assumption_id: 
                 "element": {
                     "type": "static_select",
                     "action_id": "confidence_score",
-                    "options": evidence_options,
-                    "initial_option": evidence_options[0],
+                    "options": EVIDENCE_OPTIONS,
+                    "initial_option": EVIDENCE_OPTIONS[0],
                 },
             },
             {

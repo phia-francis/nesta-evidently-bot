@@ -185,10 +185,19 @@ def publish_home_tab(client, user_id: str, active_tab: str = "overview") -> None
     project_data = db_service.get_active_project(user_id)
     metrics = None
     stage_info = None
+    next_best_actions = None
     if project_data:
         metrics = db_service.get_metrics(project_data["id"])
         stage_info = toolkit_service.get_stage_info(project_data["stage"])
-    view = UIManager.get_home_view(user_id, project_data, active_tab, metrics, stage_info)
+        next_best_actions = ai_service.generate_next_best_actions(project_data, metrics)
+    view = UIManager.get_home_view(
+        user_id,
+        project_data,
+        active_tab,
+        metrics,
+        stage_info,
+        next_best_actions,
+    )
     client.views_publish(user_id=user_id, view=view)
 
 
@@ -921,31 +930,39 @@ def open_silent_score(ack, body, client):  # noqa: ANN001
 
 
 @app.view("submit_silent_score")
-def submit_silent_score(ack, body, view, client):  # noqa: ANN001
+def submit_silent_score(ack, body, view, client, logger):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
-    session_id_str, assumption_id_str = view["private_metadata"].split(":")
-    session_id = int(session_id_str)
-    assumption_id = int(assumption_id_str)
-    values = view["state"]["values"]
-    impact = int(values["impact_block"]["impact_score"]["selected_option"]["value"])
-    uncertainty = int(values["uncertainty_block"]["uncertainty_score"]["selected_option"]["value"])
-    feasibility = int(values["feasibility_block"]["feasibility_score"]["selected_option"]["value"])
-    confidence = int(values["evidence_block"]["confidence_score"]["selected_option"]["value"])
-    rationale = values.get("rationale_block", {}).get("rationale_text", {}).get("value")
+    try:
+        session_id_str, assumption_id_str = view["private_metadata"].split(":")
+        session_id = int(session_id_str)
+        assumption_id = int(assumption_id_str)
+        values = view["state"]["values"]
+        impact = int(values["impact_block"]["impact_score"]["selected_option"]["value"])
+        uncertainty = int(values["uncertainty_block"]["uncertainty_score"]["selected_option"]["value"])
+        feasibility = int(values["feasibility_block"]["feasibility_score"]["selected_option"]["value"])
+        confidence = int(values["evidence_block"]["confidence_score"]["selected_option"]["value"])
+        rationale = values.get("rationale_block", {}).get("rationale_text", {}).get("value")
 
-    db_service.record_decision_score(
-        session_id=session_id,
-        assumption_id=assumption_id,
-        user_id=user_id,
-        impact=impact,
-        uncertainty=uncertainty,
-        feasibility=feasibility,
-        confidence=confidence,
-        rationale=rationale,
-    )
+        db_service.record_decision_score(
+            session_id=session_id,
+            assumption_id=assumption_id,
+            user_id=user_id,
+            impact=impact,
+            uncertainty=uncertainty,
+            feasibility=feasibility,
+            confidence=confidence,
+            rationale=rationale,
+        )
 
-    client.chat_postMessage(channel=user_id, text="✅ Your silent score has been saved.")
+        client.chat_postMessage(channel=user_id, text="✅ Your silent score has been saved.")
+    except (KeyError, ValueError) as exc:
+        logger.error("Error parsing silent score submission for user %s: %s", user_id, exc, exc_info=True)
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text="❌ There was an error processing your score. Please try again.",
+        )
 
 
 @app.action("end_decision_session")

@@ -6,6 +6,8 @@ from slack_sdk.models.blocks import PlainTextObject
 
 from services.db_service import DbService
 
+DISAGREEMENT_STD_DEV_THRESHOLD = 1.2
+
 
 class DecisionRoomService:
     def __init__(self, db_service: DbService):
@@ -90,7 +92,7 @@ class DecisionRoomService:
             uncertainty_std = statistics.stdev(uncertainties) if len(uncertainties) > 1 else 0
             feasibility_std = statistics.stdev(feasibilities) if len(feasibilities) > 1 else 0
 
-            disagreement_flag = max(impact_std, uncertainty_std, feasibility_std) > 1.2
+            disagreement_flag = max(impact_std, uncertainty_std, feasibility_std) > DISAGREEMENT_STD_DEV_THRESHOLD
 
             results[assumption_id] = {
                 "avg_impact": statistics.mean(impacts) if impacts else 0,

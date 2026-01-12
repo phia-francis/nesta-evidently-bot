@@ -150,6 +150,31 @@ Conversation:
             logger.error("Failed to generate canvas suggestion", exc_info=True)
             return Config.AI_CANVAS_FALLBACK
 
+    def generate_next_best_actions(self, project: dict, metrics: dict[str, int] | None = None) -> list[str]:
+        """Generate next best actions for the overview workspace."""
+        metrics = metrics or {}
+        prompt = f"""
+You are Evidently, Nesta's Test & Learn assistant. Suggest up to three next best actions for this project.
+Return JSON only as an array of short action strings. Use British English.
+
+Project name: {project.get('name')}
+Stage: {project.get('stage')}
+Experiments: {metrics.get('experiments', 0)}
+Validated assumptions: {metrics.get('validated', 0)}
+Rejected assumptions: {metrics.get('rejected', 0)}
+Assumption count: {len(project.get('assumptions', []))}
+"""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            response_text = response.text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(response_text)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item]
+            return []
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to generate next best actions", exc_info=True)
+            return []
+
     def recommend_methods(self, stage: str, context: str) -> str:
         """Recommend Nesta Playbook methods with rationale and case studies."""
         methods = knowledge_base.get_stage_methods(stage)
