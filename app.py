@@ -735,8 +735,8 @@ def handle_insert_questions(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
     values = body["view"]["state"]["values"]
-    method = values["method_block"]["method_select"]["selected_option"]["value"]
-    channel_id = values["channel_select"]["channel_input"]["selected_channel"]
+    method = values.get("method_block", {}).get("method_select", {}).get("selected_option", {}).get("value")
+    channel_id = values.get("channel_select", {}).get("channel_input", {}).get("selected_channel")
     questions = toolkit_service.get_question_bank(method)
     questions_text = "\n".join([f"• {question}" for question in questions])
     message = f"📋 *Suggested Questions for {method}:*\n\n{questions_text}"
