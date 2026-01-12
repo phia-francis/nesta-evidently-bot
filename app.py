@@ -1037,7 +1037,15 @@ def handle_export_report(ack, body, client):  # noqa: ANN001
             y_position -= 16
     pdf.save()
     buffer.seek(0)
-    dm_channel = client.conversations_open(users=user_id)["channel"]["id"]
+    response = client.conversations_open(users=user_id)
+    if not response.get("ok"):
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text=f"Could not open a direct message to send the report. Error: {response.get('error', 'Unknown error')}",
+        )
+        return
+    dm_channel = response["channel"]["id"]
     client.files_upload_v2(
         channel=dm_channel,
         file=buffer,
