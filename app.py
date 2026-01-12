@@ -2073,7 +2073,16 @@ def open_update_experiment_modal_action(ack, body, client):  # noqa: ANN001
     open_update_experiment_modal(client, body["trigger_id"], experiment)
 
 
-def _sync_experiment_to_asana(client, user_id, project, experiment, channel_id):
+ASANA_DATASET_LINK_PREFIX = "asana:"
+
+
+def _sync_experiment_to_asana(
+    client: "WebClient",
+    user_id: str,
+    project: dict,
+    experiment: dict,
+    channel_id: str,
+) -> bool:
     description = (
         f"Hypothesis: {experiment.get('hypothesis', '—')}\n"
         f"Method: {experiment.get('method', '—')}\n"
@@ -2094,7 +2103,7 @@ def _sync_experiment_to_asana(client, user_id, project, experiment, channel_id):
     if asana_task.get("task_id"):
         db_service.update_experiment(
             experiment["id"],
-            data={"dataset_link": f"asana:{asana_task['task_id']}"},
+            data={"dataset_link": f"{ASANA_DATASET_LINK_PREFIX}{asana_task['task_id']}"},
         )
     if asana_task.get("link"):
         client.chat_postMessage(
