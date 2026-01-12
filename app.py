@@ -321,19 +321,20 @@ def publish_home_tab_async(client, user_id: str, active_tab: str = "overview") -
         return
 
     def update_actions() -> None:
-        next_best_actions = ai_service.generate_next_best_actions(project_data, metrics)
-        refreshed_view = UIManager.get_home_view(
-            user_id,
-            project_data,
-            all_projects,
-            active_tab,
-            metrics,
-            stage_info,
-            next_best_actions,
-        )
-        client.views_publish(user_id=user_id, view=refreshed_view)
-
-    run_in_background(update_actions)
+        try:
+            next_best_actions = ai_service.generate_next_best_actions(project_data, metrics)
+            refreshed_view = UIManager.get_home_view(
+                user_id,
+                project_data,
+                all_projects,
+                active_tab,
+                metrics,
+                stage_info,
+                next_best_actions,
+            )
+            client.views_publish(user_id=user_id, view=refreshed_view)
+        except Exception:
+            logger.exception("Failed to generate and publish next best actions for user %s", user_id)
 
 
 @app.action("refresh_home")
