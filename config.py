@@ -9,15 +9,28 @@ class Config:
     SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
     SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
     SLACK_APP_TOKEN = os.environ["SLACK_APP_TOKEN"]
+    SLACK_APP_ID = os.environ.get("SLACK_APP_ID")
     GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
+    ASANA_TOKEN = os.environ.get("ASANA_TOKEN")
+    ASANA_WORKSPACE_ID = os.environ.get("ASANA_WORKSPACE_ID")
     # NEW: Standard Database URL
     DATABASE_URL = os.environ["DATABASE_URL"]
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     PORT = int(os.environ.get("PORT", 10000))
+    HOST = os.environ.get("HOST", "0.0.0.0")
 
     # Thresholds
     CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", 0.8))
     STALE_DAYS = int(os.environ.get("STALE_DAYS", 14))
+    NESTA_TIP_ICON_URL = os.environ.get("NESTA_TIP_ICON_URL", "https://emojicdn.elk.sh/💡")
+    AI_CANVAS_FALLBACK = os.environ.get(
+        "AI_CANVAS_FALLBACK",
+        "We need to validate this area with more evidence.",
+    )
+    AI_EXPERIMENT_FALLBACK = os.environ.get(
+        "AI_EXPERIMENT_FALLBACK",
+        "Unable to generate experiments right now.",
+    )
 
 
 class Brand:

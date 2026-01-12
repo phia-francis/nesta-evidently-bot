@@ -6,7 +6,7 @@ from typing import Iterable
 
 import google.generativeai as genai
 
-from config import Category, Config
+from config import Config
 from services import knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 _GEMINI_MODEL_NAME = "gemini-1.5-flash"
 _TEMPERATURE = 0.2
 
-_PII_REGEX = re.compile(r"([\w.-]+@[\w.-]+)|(\+?\d[\d\s-]{7,}\d)")
+_PII_REGEX = re.compile(
+    r"(\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)|(\+?\d[\d\s-]{7,}\d)"
+)
 
 
 class EvidenceAI:
@@ -26,19 +28,9 @@ class EvidenceAI:
     def redact_pii(text: str) -> str:
         return _PII_REGEX.sub("[redacted]", text)
 
-    @staticmethod
-    @staticmethod
-    def _redact_pii(text: str) -> str:
-        """Simple regex-based PII redaction before sending to AI."""
-        email_pattern = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
-        phone_pattern = r"\b\d{3}[-. ]?\d{3}[-. ]?\d{4}\b"
-        text = re.sub(email_pattern, "[EMAIL_REDACTED]", text)
-        text = re.sub(phone_pattern, "[PHONE_REDACTED]", text)
-        return text
-
     async def analyze_thread_async(self, conversation_text: str) -> dict:
         """Async analysis wrapper with PII redaction and robust parsing."""
-        clean_text = self._redact_pii(conversation_text)
+        clean_text = self.redact_pii(conversation_text)
         prompt = f"""
         Act as a Senior Innovation Consultant. Analyse this Slack thread.
 
@@ -80,14 +72,35 @@ class EvidenceAI:
             attachment_context = "\nAttachments available:\n" + "\n".join(formatted)
 
         prompt = f"""
-You are Evidently, Nesta's Test & Learn assistant. Respond in strict JSON using British English for free text.
-Reference Playbook: {knowledge_base.FRAMEWORK_STAGES}
-Methods Toolkit: {knowledge_base.METHODS_TOOLKIT}
-Case Studies: {knowledge_base.CASE_STUDIES}
-Keys: summary (string), key_decision (boolean), action_items (array of strings), emergent_assumptions (array of strings), assumptions (array of objects).
-Each assumption object must include: id (stable hash or slug), text, category (one of {Category.OPPORTUNITY.value}, {Category.CAPABILITY.value}, {Category.PROGRESS.value}), confidence_score (integer 0-100), status ("active" or "stale"), provenance_source (string e.g. meeting name), source_id (string identifier), last_verified_at (ISO8601 string or null).
+You are Evidently, an innovation assistant. Analyse this thread.
+
+TASK 1: "SO WHAT?" SUMMARY
+Provide a single, punchy sentence explaining the practical implication of this discussion.
+Format: "We agreed to [ACTION] because [RATIONALE], which unlocks [OUTCOME]."
+
+TASK 2: EXTRACT ASSUMPTIONS
+Identify assumptions mapping to the OCP framework (Opportunity, Capability, Progress).
+For each, assign a confidence score (0-100) based on evidence mentioned, not just sentiment.
+
+TASK 3: PROVENANCE
+Identify the source of the insight. If a specific document or user stated it, quote them.
+
+RETURN JSON ONLY.
+{{
+    "so_what_summary": "string",
+    "assumptions": [
+        {{
+            "text": "string",
+            "category": "Opportunity|Capability|Progress",
+            "confidence_score": int,
+            "evidence_snippet": "string",
+            "source_user": "string"
+        }}
+    ]
+}}
+
 Conversation:
-{self._redact_pii(conversation_text)}
+{self.redact_pii(conversation_text)}
 {attachment_context}
 """
 
@@ -97,6 +110,7 @@ Conversation:
             parsed = json.loads(response_text)
             for assumption in parsed.get("assumptions", []):
                 assumption["text"] = self.redact_pii(assumption.get("text", ""))
+                assumption["evidence_snippet"] = self.redact_pii(assumption.get("evidence_snippet", ""))
             return parsed
         except json.JSONDecodeError as exc:
             logger.error("AI Analysis - Failed to parse JSON", exc_info=True)
@@ -118,7 +132,48 @@ Conversation:
             return response.text
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to generate experiment suggestions", exc_info=True)
-            return "Could not generate experiments right now."
+            return Config.AI_EXPERIMENT_FALLBACK
+
+    def generate_canvas_suggestion(self, section: str, context: str) -> str:
+        """Suggest a single canvas item for a given section and project context."""
+        prompt = (
+            "You are Evidently, Nesta's Test & Learn assistant. "
+            "Provide one concise canvas item for the section below. "
+            "Use British English and avoid jargon.\n"
+            f"Section: {section}\n"
+            f"Project context: {context}"
+        )
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            return response.text.strip()
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to generate canvas suggestion", exc_info=True)
+            return Config.AI_CANVAS_FALLBACK
+
+    def generate_next_best_actions(self, project: dict, metrics: dict[str, int] | None = None) -> list[str]:
+        """Generate next best actions for the overview workspace."""
+        metrics = metrics or {}
+        prompt = f"""
+You are Evidently, Nesta's Test & Learn assistant. Suggest up to three next best actions for this project.
+Return JSON only as an array of short action strings. Use British English.
+
+Project name: {project.get('name')}
+Stage: {project.get('stage')}
+Experiments: {metrics.get('experiments', 0)}
+Validated assumptions: {metrics.get('validated', 0)}
+Rejected assumptions: {metrics.get('rejected', 0)}
+Assumption count: {len(project.get('assumptions', []))}
+"""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            response_text = response.text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(response_text)
+            if isinstance(parsed, list):
+                return [str(item) for item in parsed if item]
+            return []
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to generate next best actions", exc_info=True)
+            return []
 
     def recommend_methods(self, stage: str, context: str) -> str:
         """Recommend Nesta Playbook methods with rationale and case studies."""
