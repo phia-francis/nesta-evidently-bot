@@ -1,10 +1,11 @@
+import io
 import logging
 import re
 import threading
 import time
-
-import pandas as pd
 from aiohttp import web
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
@@ -23,6 +24,7 @@ from blocks.modals import (
     create_channel_modal,
     experiment_modal,
     extract_insights_modal,
+    get_loading_modal,
     invite_member_modal,
     link_channel_modal,
     silent_scoring_modal,
@@ -186,13 +188,16 @@ def publish_home_tab(client, user_id: str, active_tab: str = "overview") -> None
     metrics = None
     stage_info = None
     next_best_actions = None
+    all_projects = None
     if project_data:
         metrics = db_service.get_metrics(project_data["id"])
         stage_info = toolkit_service.get_stage_info(project_data["stage"])
         next_best_actions = ai_service.generate_next_best_actions(project_data, metrics)
+        all_projects = db_service.get_user_projects(user_id)
     view = UIManager.get_home_view(
         user_id,
         project_data,
+        all_projects,
         active_tab,
         metrics,
         stage_info,
@@ -222,10 +227,147 @@ def start_setup(ack, body, client):  # noqa: ANN001
     client.views_open(trigger_id=body["trigger_id"], view=get_setup_step_1_modal())
 
 
+@app.action("create_collection_modal")
+def open_collection_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "create_collection_submit",
+            "title": {"type": "plain_text", "text": "New Collection"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "name",
+                    "label": {"type": "plain_text", "text": "Name"},
+                    "element": {"type": "plain_text_input", "action_id": "val"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "desc",
+                    "label": {"type": "plain_text", "text": "Description"},
+                    "element": {"type": "plain_text_input", "action_id": "val", "multiline": True},
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Create"},
+        },
+    )
+
+
+@app.view("create_collection_submit")
+def create_collection_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        data = body["view"]["state"]["values"]
+        name = data["name"]["val"]["value"]
+        description = data["desc"]["val"]["value"]
+        project = db_service.get_active_project(user_id)
+        if not project:
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+            return
+        db_service.create_collection(project["id"], name, description)
+        publish_home_tab(client, user_id, "roadmap:collections")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to create collection: %s", exc, exc_info=True)
+
+
+@app.action("create_automation_modal")
+def open_automation_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "create_rule_submit",
+            "title": {"type": "plain_text", "text": "New Automation Rule"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "trigger",
+                    "label": {"type": "plain_text", "text": "When this happens..."},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "val",
+                        "options": [
+                            {
+                                "text": {"type": "plain_text", "text": "Experiment Created"},
+                                "value": "experiment_created",
+                            },
+                            {
+                                "text": {"type": "plain_text", "text": "Assumption Validated"},
+                                "value": "assumption_validated",
+                            },
+                            {"text": {"type": "plain_text", "text": "Every Monday"}, "value": "weekly_schedule"},
+                        ],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "action",
+                    "label": {"type": "plain_text", "text": "Do this..."},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "val",
+                        "options": [
+                            {
+                                "text": {"type": "plain_text", "text": "Notify Project Channel"},
+                                "value": "notify_channel",
+                            },
+                            {"text": {"type": "plain_text", "text": "Email Team Lead"}, "value": "email_lead"},
+                        ],
+                    },
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Save Rule"},
+        },
+    )
+
+
+@app.view("create_rule_submit")
+def create_rule_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        data = body["view"]["state"]["values"]
+        trigger = data["trigger"]["val"]["selected_option"]["value"]
+        action = data["action"]["val"]["selected_option"]["value"]
+        project = db_service.get_active_project(user_id)
+        if not project:
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+            return
+        db_service.create_automation_rule(project["id"], trigger, action)
+        publish_home_tab(client, user_id, "team:automation")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to create automation rule: %s", exc, exc_info=True)
+
+
+@app.action("select_active_project")
+def handle_project_switch(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    selected_project_id = body["actions"][0]["selected_option"]["value"]
+    db_service.set_active_project(user_id, int(selected_project_id))
+    publish_home_tab(client, user_id)
+
+
 @app.view("setup_step_2_submit")
 def handle_step_1(ack, body, client):  # noqa: ANN001
     problem = body["view"]["state"]["values"]["problem_block"]["problem_input"]["value"]
     ack(response_action="push", view=get_setup_step_2_modal(problem))
+
+
+@app.command("/evidently-help")
+def handle_help_command(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user_id"]
+    client.chat_postEphemeral(
+        channel=body["channel_id"],
+        user=user_id,
+        text="📘 *Evidently Guide*",
+        blocks=UIManager._render_help_workspace(),
+    )
 
 
 @app.view("setup_final_submit")
@@ -319,11 +461,98 @@ def open_assumption_modal(client, trigger_id: str) -> None:
     )
 
 
+def open_edit_assumption_modal(client, trigger_id: str, assumption: dict) -> None:
+    lane_options = [
+        {"text": {"type": "plain_text", "text": "Now"}, "value": "Now"},
+        {"text": {"type": "plain_text", "text": "Next"}, "value": "Next"},
+        {"text": {"type": "plain_text", "text": "Later"}, "value": "Later"},
+    ]
+    status_options = [
+        {"text": {"type": "plain_text", "text": "Testing"}, "value": "Testing"},
+        {"text": {"type": "plain_text", "text": "Validated"}, "value": "Validated"},
+        {"text": {"type": "plain_text", "text": "Rejected"}, "value": "Rejected"},
+    ]
+    lane_option = next((option for option in lane_options if option["value"] == assumption["lane"]), None)
+    status_option = next(
+        (option for option in status_options if option["value"] == assumption["validation_status"]),
+        None,
+    )
+    client.views_open(
+        trigger_id=trigger_id,
+        view={
+            "type": "modal",
+            "callback_id": "edit_assumption_submit",
+            "private_metadata": str(assumption["id"]),
+            "title": {"type": "plain_text", "text": "Edit Roadmap Item"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "assumption_title",
+                    "label": {"type": "plain_text", "text": "Roadmap item"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "title_input",
+                        "initial_value": assumption["title"],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_lane",
+                    "label": {"type": "plain_text", "text": "Lane"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "lane_input",
+                        "options": lane_options,
+                        "initial_option": lane_option or lane_options[0],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_status",
+                    "label": {"type": "plain_text", "text": "Validation status"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "status_input",
+                        "options": status_options,
+                        "initial_option": status_option or status_options[0],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_density",
+                    "label": {"type": "plain_text", "text": "Evidence density (docs)"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "density_input",
+                        "initial_value": str(assumption.get("evidence_density", 0)),
+                    },
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Save"},
+        },
+    )
+
+
 @app.action("open_create_assumption")
 @app.action("open_add_assumption")
 def open_create_assumption_modal(ack, body, client):  # noqa: ANN001
     ack()
     open_assumption_modal(client, body["trigger_id"])
+
+
+@app.action("edit_assumption")
+def open_edit_assumption(ack, body, client):  # noqa: ANN001
+    ack()
+    assumption_id = int(body["actions"][0]["value"])
+    assumption = db_service.get_assumption(assumption_id)
+    if not assumption:
+        client.chat_postEphemeral(
+            channel=body["user"]["id"],
+            user=body["user"]["id"],
+            text="That roadmap item could not be found.",
+        )
+        return
+    open_edit_assumption_modal(client, body["trigger_id"], assumption)
 
 
 @app.action("add_canvas_item")
@@ -336,11 +565,49 @@ def open_canvas_item_modal(ack, body, client):  # noqa: ANN001
 @app.action("attach_question_bank")
 def attach_question_bank(ack, body, client):  # noqa: ANN001
     ack()
-    client.chat_postEphemeral(
-        channel=body["user"]["id"],
-        user=body["user"]["id"],
-        text="Question banks are coming soon.",
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "insert_questions",
+            "title": {"type": "plain_text", "text": "Question Bank"},
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "Select a method to generate relevant interview questions.",
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "method_block",
+                    "label": {"type": "plain_text", "text": "Method"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "method_select",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "User Interview"}, "value": "User Interview"},
+                            {"text": {"type": "plain_text", "text": "Fake Door Follow-up"}, "value": "Fake Door"},
+                            {"text": {"type": "plain_text", "text": "Concept Testing"}, "value": "Concept Testing"},
+                        ],
+                    },
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Send to Channel"},
+        },
     )
+
+
+@app.view("insert_questions")
+def handle_insert_questions(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    method = body["view"]["state"]["values"]["method_block"]["method_select"]["selected_option"]["value"]
+    questions = toolkit_service.get_question_bank(method)
+    questions_text = "\n".join([f"• {question}" for question in questions])
+    message = f"📋 *Suggested Questions for {method}:*\n\n{questions_text}"
+    client.chat_postMessage(channel=user_id, text=message)
 
 
 @app.view("add_canvas_item_submit")
@@ -600,20 +867,49 @@ def handle_export_report(ack, body, client):  # noqa: ANN001
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
         return
-    metrics = db_service.get_metrics(project["id"])
-    report = pd.DataFrame(
-        [
-            {"Metric": "Experiments Run", "Value": metrics["experiments"]},
-            {"Metric": "Validated Assumptions", "Value": metrics["validated"]},
-            {"Metric": "Rejected Hypotheses", "Value": metrics["rejected"]},
-        ]
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text="📄 Generating PDF report... please wait.",
     )
-    csv_data = report.to_csv(index=False)
-    client.files_upload(
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+    pdf.setFont("Helvetica-Bold", 16)
+    pdf.drawString(72, 750, f"Learning Report: {project['name']}")
+    pdf.setFont("Helvetica", 12)
+    y_position = 720
+    metrics = db_service.get_metrics(project["id"])
+    pdf.drawString(72, y_position, "Summary Metrics")
+    y_position -= 18
+    pdf.drawString(90, y_position, f"Experiments Run: {metrics['experiments']}")
+    y_position -= 16
+    pdf.drawString(90, y_position, f"Validated Assumptions: {metrics['validated']}")
+    y_position -= 16
+    pdf.drawString(90, y_position, f"Rejected Hypotheses: {metrics['rejected']}")
+    y_position -= 24
+    pdf.drawString(72, y_position, "Recent Experiments")
+    y_position -= 18
+    experiments = db_service.get_experiments(project["id"])
+    if not experiments:
+        pdf.drawString(90, y_position, "No experiments logged yet.")
+    else:
+        for experiment in experiments:
+            if y_position < 72:
+                pdf.showPage()
+                pdf.setFont("Helvetica", 12)
+                y_position = 750
+            status = experiment.get("status", "Planning")
+            title = experiment.get("title") or "Untitled Experiment"
+            pdf.drawString(90, y_position, f"- {title} ({status})")
+            y_position -= 16
+    pdf.save()
+    buffer.seek(0)
+    client.files_upload_v2(
         channels=user_id,
-        content=csv_data,
-        filename=f"{project['name'].lower().replace(' ', '-')}-insights.csv",
-        title="Evidently Insights Export",
+        file=buffer,
+        filename=f"{project['name'].lower().replace(' ', '-')}-report.pdf",
+        title="Evidently Learning Report",
+        initial_comment="Here is your generated executive report. 📄",
     )
 
 
@@ -649,6 +945,36 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
         publish_home_tab(client, user_id, "roadmap:roadmap")
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to create assumption: %s", exc, exc_info=True)
+
+
+@app.view("edit_assumption_submit")
+def handle_edit_assumption_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    assumption_id = int(body["view"]["private_metadata"])
+    try:
+        values = body["view"]["state"]["values"]
+        title = values["assumption_title"]["title_input"]["value"]
+        lane = values["assumption_lane"]["lane_input"]["selected_option"]["value"]
+        status = values["assumption_status"]["status_input"]["selected_option"]["value"]
+        density_text = values["assumption_density"]["density_input"]["value"]
+        try:
+            density = max(0, int(density_text))
+        except (ValueError, TypeError):
+            density = 0
+
+        db_service.update_assumption(
+            assumption_id,
+            {
+                "title": title,
+                "lane": lane,
+                "validation_status": status,
+                "evidence_density": density,
+            },
+        )
+        publish_home_tab(client, user_id, "roadmap:roadmap")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to update assumption: %s", exc, exc_info=True)
 
 
 @app.action("design_experiment")
@@ -750,36 +1076,221 @@ def handle_ai_experiments(ack, body, client):  # noqa: ANN001
 
 
 @app.action("create_experiment_manual")
-def handle_experiment_manual(ack, body, client):  # noqa: ANN001
+def open_manual_experiment_modal(ack, body, client):  # noqa: ANN001
     ack()
-    client.chat_postEphemeral(
-        channel=body["user"]["id"],
-        user=body["user"]["id"],
-        text="Manual experiment creation is coming soon.",
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "create_experiment_submit",
+            "title": {"type": "plain_text", "text": "New Experiment"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "title_block",
+                    "label": {"type": "plain_text", "text": "Experiment Title"},
+                    "element": {"type": "plain_text_input", "action_id": "title"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "method_block",
+                    "label": {"type": "plain_text", "text": "Method"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "method",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "Fake Door"}, "value": "Fake Door"},
+                            {"text": {"type": "plain_text", "text": "User Interview"}, "value": "User Interview"},
+                            {"text": {"type": "plain_text", "text": "A/B Test"}, "value": "A/B Test"},
+                            {"text": {"type": "plain_text", "text": "Concierge MVP"}, "value": "Concierge MVP"},
+                        ],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "hypothesis_block",
+                    "label": {"type": "plain_text", "text": "Hypothesis"},
+                    "element": {"type": "plain_text_input", "action_id": "hypothesis", "multiline": True},
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Launch Experiment"},
+        },
     )
+
+
+@app.view("create_experiment_submit")
+def handle_create_experiment(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        values = body["view"]["state"]["values"]
+        title = values["title_block"]["title"]["value"]
+        method = values["method_block"]["method"]["selected_option"]["value"]
+        hypothesis = values["hypothesis_block"]["hypothesis"]["value"]
+
+        project = db_service.get_active_project(user_id)
+        if not project:
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+            return
+
+        db_service.create_experiment(
+            project_id=project["id"],
+            title=title,
+            method=method,
+            hypothesis=hypothesis,
+        )
+        if project.get("channel_id"):
+            client.chat_postMessage(
+                channel=project["channel_id"],
+                text=f"🧪 *New Experiment Created: {title}*\n_{hypothesis}_",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": f"🧪 *New Experiment Created: {title}*"},
+                    },
+                    {
+                        "type": "context",
+                        "elements": [
+                            {"type": "mrkdwn", "text": f"Method: {method} | Owner: <@{user_id}>"}
+                        ],
+                    },
+                ],
+            )
+        publish_home_tab(client, user_id, "experiments:active")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to create experiment: %s", exc, exc_info=True)
 
 
 @app.action("update_experiment")
-def handle_update_experiment(ack, body, client):  # noqa: ANN001
+def open_update_experiment_modal(ack, body, client):  # noqa: ANN001
     ack()
-    client.chat_postEphemeral(
-        channel=body["user"]["id"],
-        user=body["user"]["id"],
-        text="Experiment updates are coming soon.",
+    experiment_id = int(body["actions"][0]["value"])
+    experiment = db_service.get_experiment(experiment_id)
+    if not experiment:
+        client.chat_postEphemeral(
+            channel=body["user"]["id"],
+            user=body["user"]["id"],
+            text="That experiment could not be found.",
+        )
+        return
+
+    status_options = [
+        {"text": {"type": "plain_text", "text": "Planning"}, "value": "Planning"},
+        {"text": {"type": "plain_text", "text": "🟢 Live"}, "value": "Live"},
+        {"text": {"type": "plain_text", "text": "✅ Completed"}, "value": "Completed"},
+        {"text": {"type": "plain_text", "text": "🛑 Paused"}, "value": "Paused"},
+    ]
+    status_option = next(
+        (option for option in status_options if option["value"] == experiment.get("status")),
+        None,
+    )
+
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "update_experiment_submit",
+            "private_metadata": str(experiment_id),
+            "title": {"type": "plain_text", "text": "Update Status"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "status_block",
+                    "label": {"type": "plain_text", "text": "Current Status"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "status",
+                        "options": status_options,
+                        "initial_option": status_option or status_options[0],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "kpi_block",
+                    "label": {"type": "plain_text", "text": "Current KPI Value (Optional)"},
+                    "optional": True,
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "kpi_value",
+                        "initial_value": experiment.get("current_value") or "",
+                    },
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Update"},
+        },
     )
 
 
-@app.action("edit_assumption")
-def handle_edit_assumption(ack, body, client):  # noqa: ANN001
+@app.view("update_experiment_submit")
+def handle_update_experiment_submit(ack, body, client, logger):  # noqa: ANN001
     ack()
-    client.chat_postEphemeral(
-        channel=body["user"]["id"],
-        user=body["user"]["id"],
-        text="Editing roadmap items is coming soon.",
-    )
+    user_id = body["user"]["id"]
+    experiment_id = int(body["view"]["private_metadata"])
+    try:
+        values = body["view"]["state"]["values"]
+        status = values["status_block"]["status"]["selected_option"]["value"]
+        kpi_value = values.get("kpi_block", {}).get("kpi_value", {}).get("value")
+
+        db_service.update_experiment(experiment_id, status=status, kpi=kpi_value)
+        project = db_service.get_active_project(user_id)
+        if project and project.get("channel_id"):
+            status_emoji = {"Live": "🟢", "Completed": "✅", "Paused": "🛑"}.get(status, "🔵")
+            client.chat_postMessage(
+                channel=project["channel_id"],
+                text=f"{status_emoji} *Experiment Update: {status}*",
+            )
+        publish_home_tab(client, user_id, "experiments:active")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to update experiment: %s", exc, exc_info=True)
 
 
 # --- 2. 'SO WHAT?' AI SUMMARISER WITH LIVE STATUS ---
+@app.event("member_joined_channel")
+def handle_channel_join(event, say, client, logger):  # noqa: ANN001
+    """Greets the channel when the bot is added."""
+    try:
+        bot_id = client.auth_test()["user_id"]
+        if event["user"] == bot_id:
+            say(
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "👋 *Thanks for adding me!* I'm Evidently, your AI innovation assistant.",
+                        },
+                    },
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": (
+                                "Here is how you can use me in this channel:\n\n"
+                                "🧵 *Analyse Threads:* Reply to any thread and mention `@Evidently` to extract "
+                                "hypotheses and evidence.\n"
+                                "⚡ *Shortcuts:* Click the `...` on any message → `Apps` → `Extract Insights`.\n"
+                                "🛠 *Toolkit:* Type `/evidently-methods` to get rapid suggestions for your current stage."
+                            ),
+                        },
+                    },
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "Open Dashboard"},
+                                "action_id": "refresh_home",
+                                "style": "primary",
+                            }
+                        ],
+                    },
+                ],
+                text="Hi! I'm ready to help analyse your conversations.",
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error handling channel join: %s", exc, exc_info=True)
+
+
 @app.event("app_mention")
 def handle_mention(body, say, client, logger):  # noqa: ANN001
     event = body["event"]
@@ -792,12 +1303,71 @@ def handle_mention(body, say, client, logger):  # noqa: ANN001
 def handle_extract_insights_shortcut(ack, body, client, logger):  # noqa: ANN001
     ack()
     message = body.get("message")
-    if message:
-        channel_id = body["channel"]["id"]
-        thread_ts = message.get("thread_ts", message["ts"])
-        run_thread_analysis(client, channel_id, thread_ts, logger)
+    if not message:
+        client.views_open(trigger_id=body["trigger_id"], view=extract_insights_modal())
         return
-    client.views_open(trigger_id=body["trigger_id"], view=extract_insights_modal())
+
+    loading_view = client.views_open(trigger_id=body["trigger_id"], view=get_loading_modal())
+    view_id = loading_view["view"]["id"]
+
+    channel_id = body["channel"]["id"]
+    thread_ts = message.get("thread_ts", message["ts"])
+
+    def run_analysis() -> None:
+        try:
+            history = client.conversations_replies(channel=channel_id, ts=thread_ts)
+            messages = history["messages"]
+            full_text = "\n".join([f"{m.get('user', 'User')}: {m.get('text')}" for m in messages])
+
+            attachments = [
+                {"name": file.get("name"), "mimetype": file.get("mimetype")}
+                for message in messages
+                for file in message.get("files", []) or []
+            ]
+
+            analysis = ai_service.analyze_thread_structured(full_text, attachments)
+
+            if analysis.get("error"):
+                client.views_update(
+                    view_id=view_id,
+                    view={
+                        "type": "modal",
+                        "title": {"type": "plain_text", "text": "Error"},
+                        "close": {"type": "plain_text", "text": "Close"},
+                        "blocks": error_block("The AI brain is briefly offline. Please try again."),
+                    },
+                )
+                return
+
+            client.views_update(
+                view_id=view_id,
+                view={
+                    "type": "modal",
+                    "callback_id": "extract_insights_results",
+                    "title": {"type": "plain_text", "text": "AI Insights"},
+                    "close": {"type": "plain_text", "text": "Close"},
+                    "blocks": get_ai_summary_block(analysis),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Error handling extract insights shortcut: %s", exc, exc_info=True)
+            client.views_update(
+                view_id=view_id,
+                view={
+                    "type": "modal",
+                    "title": {"type": "plain_text", "text": "Error"},
+                    "close": {"type": "plain_text", "text": "Close"},
+                    "blocks": [
+                        {
+                            "type": "section",
+                            "text": {"type": "mrkdwn", "text": f"❌ *Something went wrong:*\n{str(exc)}"},
+                        }
+                    ],
+                },
+            )
+
+    analysis_thread = threading.Thread(target=run_analysis, daemon=True)
+    analysis_thread.start()
 
 # --- 3. ACTIVE PERSISTENCE / NUDGES ---
 @app.action("nudge_action")
