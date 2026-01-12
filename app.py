@@ -2073,6 +2073,46 @@ def open_update_experiment_modal_action(ack, body, client):  # noqa: ANN001
     open_update_experiment_modal(client, body["trigger_id"], experiment)
 
 
+ASANA_DATASET_LINK_PREFIX = "asana:"
+
+
+def _sync_experiment_to_asana(
+    client: "WebClient",
+    user_id: str,
+    project: dict,
+    experiment: dict,
+    channel_id: str,
+) -> bool:
+    description = (
+        f"Hypothesis: {experiment.get('hypothesis', '—')}\n"
+        f"Method: {experiment.get('method', '—')}\n"
+        f"Current KPI: {experiment.get('primary_kpi', '—')}"
+    )
+    asana_task = integration_service.create_asana_task(
+        project_name=project["name"],
+        task_name=experiment.get("title", "Experiment"),
+        description=description,
+    )
+    if asana_task.get("error"):
+        client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text=asana_task["error"],
+        )
+        return False
+    if asana_task.get("task_id"):
+        db_service.update_experiment(
+            experiment["id"],
+            data={"dataset_link": f"{ASANA_DATASET_LINK_PREFIX}{asana_task['task_id']}"},
+        )
+    if asana_task.get("link"):
+        client.chat_postMessage(
+            channel=channel_id,
+            text=f"✅ Synced to Asana: <{asana_task['link']}|View Task>",
+        )
+    return True
+
+
 @app.view("update_experiment_submit")
 def handle_update_experiment_submit(ack, body, client, logger):  # noqa: ANN001
     ack()
@@ -2094,32 +2134,13 @@ def handle_update_experiment_submit(ack, body, client, logger):  # noqa: ANN001
             if status == "Live":
                 experiment = db_service.get_experiment(experiment_id)
                 if experiment:
-                    description = (
-                        f"Hypothesis: {experiment.get('hypothesis', '—')}\n"
-                        f"Method: {experiment.get('method', '—')}\n"
-                        f"Current KPI: {experiment.get('primary_kpi', '—')}"
+                    _sync_experiment_to_asana(
+                        client,
+                        user_id,
+                        project,
+                        experiment,
+                        project["channel_id"],
                     )
-                    asana_task = integration_service.create_asana_task(
-                        project_name=project["name"],
-                        task_name=experiment.get("title", "Experiment"),
-                        description=description,
-                    )
-                    if asana_task.get("error"):
-                        client.chat_postEphemeral(
-                            channel=project["channel_id"],
-                            user=user_id,
-                            text=asana_task["error"],
-                        )
-                    elif asana_task.get("link"):
-                        if asana_task.get("task_id"):
-                            db_service.update_experiment(
-                                experiment_id,
-                                data={"dataset_link": f"asana:{asana_task['task_id']}"},
-                            )
-                        client.chat_postMessage(
-                            channel=project["channel_id"],
-                            text=f"✅ Synced to Asana: <{asana_task['link']}|View Task>",
-                        )
         publish_home_tab_async(client, user_id, "experiments:active")
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to update experiment: %s", exc, exc_info=True)
@@ -2158,33 +2179,13 @@ def handle_experiment_overflow(ack, body, client):  # noqa: ANN001
                 text="Please create a project first.",
             )
             return
-        description = (
-            f"Hypothesis: {experiment.get('hypothesis', '—')}\n"
-            f"Method: {experiment.get('method', '—')}\n"
-            f"Current KPI: {experiment.get('primary_kpi', '—')}"
+        _sync_experiment_to_asana(
+            client,
+            body["user"]["id"],
+            project,
+            experiment,
+            body["channel"]["id"],
         )
-        asana_task = integration_service.create_asana_task(
-            project_name=project["name"],
-            task_name=experiment.get("title", "Experiment"),
-            description=description,
-        )
-        if asana_task.get("error"):
-            client.chat_postEphemeral(
-                channel=body["channel"]["id"],
-                user=body["user"]["id"],
-                text=asana_task["error"],
-            )
-            return
-        if asana_task.get("task_id"):
-            db_service.update_experiment(
-                experiment["id"],
-                data={"dataset_link": f"asana:{asana_task['task_id']}"},
-            )
-        if asana_task.get("link"):
-            client.chat_postMessage(
-                channel=body["channel"]["id"],
-                text=f"✅ Synced to Asana: <{asana_task['link']}|View Task>",
-            )
 
 
 @app.action("draft_experiment_from_chat")
