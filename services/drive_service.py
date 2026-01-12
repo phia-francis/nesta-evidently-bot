@@ -1,11 +1,11 @@
-import json
 import logging
 import os
 import re
 
-from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+from services.google_auth_service import get_google_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -30,15 +30,8 @@ class DriveService:
             logger.warning("Failed to initialize Google Drive clients: %s", exc)
 
     def _get_credentials(self):
-        json_str = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-        if json_str:
-            info = json.loads(json_str)
-            return service_account.Credentials.from_service_account_info(info, scopes=self.SCOPES)
-
-        if os.path.exists("service_account.json"):
-            return service_account.Credentials.from_service_account_file("service_account.json", scopes=self.SCOPES)
-
-        return None
+        allow_file_fallback = os.path.exists("service_account.json")
+        return get_google_credentials(self.SCOPES, allow_file_fallback=allow_file_fallback)
 
     def get_file_content(self, file_id: str) -> str | None:
         if not self.docs_service:

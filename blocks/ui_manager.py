@@ -7,6 +7,7 @@ class UIManager:
         (2, "Moderate 🟢"),
         (0, "Low 🟠"),
     )
+
     @staticmethod
     def get_home_view(
         user_id: str,
@@ -14,6 +15,7 @@ class UIManager:
         active_tab: str = "overview",
         metrics: dict[str, int] | None = None,
         stage_info: dict[str, Any] | None = None,
+        next_best_actions: list[str] | None = None,
     ) -> dict:
         if not project:
             return UIManager._get_onboarding_view()
@@ -25,33 +27,27 @@ class UIManager:
             "case_study": "",
         }
 
-        blocks: list[dict[str, Any]] = []
-        blocks.append(
+        blocks: list[dict[str, Any]] = [
             {
                 "type": "header",
-                "text": {"type": "plain_text", "text": f"🚀 {project['name']} | Stage: {project['stage']}"},
+                "text": {"type": "plain_text", "text": f"🚀 {project['name']}"},
             }
-        )
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": UIManager._nav_buttons(active_tab),
-            }
-        )
+        ]
+        blocks.append({"type": "actions", "elements": UIManager._nav_buttons(active_tab)})
         blocks.append({"type": "divider"})
 
         workspace, subtab = UIManager._parse_tab(active_tab)
 
         if workspace == "overview":
-            blocks.extend(UIManager._render_overview(project, metrics))
+            blocks.extend(UIManager._render_overview_workspace(project, metrics, next_best_actions))
         elif workspace == "discovery":
-            blocks.extend(UIManager._render_discovery(project, subtab, metrics))
+            blocks.extend(UIManager._render_discovery_workspace(project, subtab, metrics))
         elif workspace == "roadmap":
-            blocks.extend(UIManager._render_roadmap(project, subtab))
+            blocks.extend(UIManager._render_roadmap_workspace(project, subtab))
         elif workspace == "experiments":
-            blocks.extend(UIManager._render_experiments(project, stage_info, subtab))
+            blocks.extend(UIManager._render_experiments_workspace(project, stage_info, subtab))
         elif workspace == "team":
-            blocks.extend(UIManager._render_team(project, subtab))
+            blocks.extend(UIManager._render_team_workspace(project, subtab))
 
         return {"type": "home", "blocks": blocks}
 
@@ -61,10 +57,10 @@ class UIManager:
         workspace, _ = UIManager._parse_tab(active_tab)
         for label, value, action_id in [
             ("1️⃣ Overview", "overview", "nav_overview"),
-            ("2️⃣ Discovery", "discovery:canvas", "nav_discovery"),
-            ("3️⃣ Roadmap", "roadmap:roadmap", "nav_roadmap"),
-            ("4️⃣ Experiments", "experiments:framework", "nav_experiments"),
-            ("5️⃣ Team", "team:decision", "nav_team"),
+            ("2️⃣ Discovery", "discovery", "nav_discovery"),
+            ("3️⃣ Roadmap", "roadmap", "nav_roadmap"),
+            ("4️⃣ Experiments", "experiments", "nav_experiments"),
+            ("5️⃣ Team", "team", "nav_team"),
         ]:
             button = {
                 "type": "button",
@@ -85,64 +81,47 @@ class UIManager:
         return active_tab, ""
 
     @staticmethod
-    def _render_overview(project: dict[str, Any], metrics: dict[str, int]) -> list[dict[str, Any]]:
+    def _render_overview_workspace(
+        project: dict[str, Any],
+        metrics: dict[str, int],
+        next_best_actions: list[str] | None,
+    ) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Project command centre*"}})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Project Health & Metrics*"}})
         blocks.append(
             {
                 "type": "section",
                 "fields": [
-                    {"type": "mrkdwn", "text": f"*Experiments:*\n{metrics['experiments']}"},
-                    {"type": "mrkdwn", "text": f"*Validated:*\n{metrics['validated']}"},
-                    {"type": "mrkdwn", "text": f"*Rejected:*\n{metrics['rejected']}"},
-                    {"type": "mrkdwn", "text": f"*Stage:*\n{project['stage']}"},
+                    {"type": "mrkdwn", "text": f"*Confidence Score:*\n{project.get('confidence_score', 0)}%"},
+                    {"type": "mrkdwn", "text": f"*Velocity:*\n{UIManager._learning_velocity_label(metrics)}"},
+                    {"type": "mrkdwn", "text": f"*Active Experiments:*\n{metrics['experiments']}"},
+                    {"type": "mrkdwn", "text": f"*Key Assumptions:*\n{len(project.get('assumptions', []))}"},
                 ],
             }
         )
         blocks.append({"type": "divider"})
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*AI suggestions*"}})
-        blocks.append(
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": "• Review new canvas ideas in Discovery.\n• Move top assumptions into the Roadmap.",
-                    }
-                ],
-            }
-        )
-        blocks.append({"type": "divider"})
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Quick actions*"}})
-        blocks.append(
-            {
-                "type": "actions",
-                "elements": [
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "✨ Extract insights"},
-                        "action_id": "open_extract_insights",
-                    },
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "🗳️ Decision Room"},
-                        "action_id": "trigger_decision_room",
-                    },
-                ],
-            }
-        )
-        blocks.append({"type": "divider"})
-        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Team overview*"}})
-        members = project.get("members", [])
-        if not members:
-            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "No team members yet."}]})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*✨ AI Next Best Actions*"}})
+        if next_best_actions:
+            actions_text = "\n".join([f"• {action}" for action in next_best_actions])
         else:
-            mentions = " ".join([f"<@{member['user_id']}>" for member in members[:8]])
-            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": mentions}]})
+            actions_text = "No recommendations available yet."
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": actions_text,
+                },
+            }
+        )
         return blocks
 
     @staticmethod
-    def _render_discovery(project: dict[str, Any], subtab: str, metrics: dict[str, int]) -> list[dict[str, Any]]:
+    def _render_discovery_workspace(
+        project: dict[str, Any],
+        subtab: str,
+        metrics: dict[str, int],
+    ) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Discovery workspace*"}})
         blocks.append(
@@ -204,7 +183,7 @@ class UIManager:
         return blocks
 
     @staticmethod
-    def _render_roadmap(project: dict[str, Any], subtab: str) -> list[dict[str, Any]]:
+    def _render_roadmap_workspace(project: dict[str, Any], subtab: str) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Roadmap workspace*"}})
         blocks.append(
@@ -337,8 +316,10 @@ class UIManager:
         return blocks
 
     @staticmethod
-    def _render_experiments(
-        project: dict[str, Any], stage_info: dict[str, Any], subtab: str
+    def _render_experiments_workspace(
+        project: dict[str, Any],
+        stage_info: dict[str, Any],
+        subtab: str,
     ) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Experiments workspace*"}})
@@ -483,7 +464,7 @@ class UIManager:
         return "Low 🟠"
 
     @staticmethod
-    def _render_team(project: dict[str, Any], subtab: str) -> list[dict[str, Any]]:
+    def _render_team_workspace(project: dict[str, Any], subtab: str) -> list[dict[str, Any]]:
         blocks: list[dict[str, Any]] = []
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Team workspace*"}})
         blocks.append(

@@ -1,13 +1,12 @@
-from slack_sdk.models.blocks import (
-    ActionsBlock,
-    DividerBlock,
-    HeaderBlock,
-    SectionBlock,
-)
+import statistics
+
+from slack_sdk.models.blocks import ActionsBlock, DividerBlock, HeaderBlock, SectionBlock
 from slack_sdk.models.blocks.block_elements import ButtonElement as Button
 from slack_sdk.models.blocks import PlainTextObject
 
 from services.db_service import DbService
+
+DISAGREEMENT_STD_DEV_THRESHOLD = 1.2
 
 
 class DecisionRoomService:
@@ -32,7 +31,12 @@ class DecisionRoomService:
 
         blocks = [
             HeaderBlock(text=f"🗳️ Decision Room: {project['name']}").to_dict(),
-            SectionBlock(text="*Team Alignment Time!* Vote on which assumptions we should test next.").to_dict(),
+            SectionBlock(
+                text=(
+                    "*Silent Scoring is live.* Rate each assumption privately across impact, uncertainty, "
+                    "feasibility, and evidence level."
+                )
+            ).to_dict(),
             DividerBlock().to_dict(),
         ]
 
@@ -48,21 +52,10 @@ class DecisionRoomService:
                 ActionsBlock(
                     elements=[
                         Button(
-                            text=PlainTextObject(text="✅ Test This"),
-                            value=f"{session_id}:{assumption['id']}:keep",
-                            action_id="vote_keep",
+                            text=PlainTextObject(text="📝 Score privately"),
+                            value=f"{session_id}:{assumption['id']}",
+                            action_id="open_silent_score",
                             style="primary",
-                        ),
-                        Button(
-                            text=PlainTextObject(text="⚠️ Pivot"),
-                            value=f"{session_id}:{assumption['id']}:pivot",
-                            action_id="vote_pivot",
-                        ),
-                        Button(
-                            text=PlainTextObject(text="🗑️ Kill"),
-                            value=f"{session_id}:{assumption['id']}:kill",
-                            action_id="vote_kill",
-                            style="danger",
                         ),
                     ]
                 ).to_dict()
@@ -85,14 +78,29 @@ class DecisionRoomService:
         client.chat_postMessage(channel=channel_id, blocks=blocks, text="Decision Room Opened")
         return True, "Session Started"
 
-    def handle_vote(self, body, client):
-        user_id = body["user"]["id"]
-        session_id, assumption_id, vote_type = body["actions"][0]["value"].split(":")
+    def reveal_scores(self, session_id: int) -> dict[int, dict[str, float | int | bool]]:
+        scores = self.db.get_session_scores(session_id)
+        results: dict[int, dict[str, float | int | bool]] = {}
 
-        self.db.cast_vote(int(session_id), int(assumption_id), user_id, vote_type)
+        for assumption_id, score_list in scores.items():
+            impacts = [s.impact for s in score_list if s.impact is not None]
+            uncertainties = [s.uncertainty for s in score_list if s.uncertainty is not None]
+            feasibilities = [s.feasibility for s in score_list if s.feasibility is not None]
+            confidences = [s.confidence for s in score_list if s.confidence is not None]
 
-        client.chat_postEphemeral(
-            channel=body["channel"]["id"],
-            user=user_id,
-            text=f"Vote cast: {vote_type.upper()} for assumption {assumption_id}",
-        )
+            impact_std = statistics.stdev(impacts) if len(impacts) > 1 else 0
+            uncertainty_std = statistics.stdev(uncertainties) if len(uncertainties) > 1 else 0
+            feasibility_std = statistics.stdev(feasibilities) if len(feasibilities) > 1 else 0
+
+            disagreement_flag = max(impact_std, uncertainty_std, feasibility_std) > DISAGREEMENT_STD_DEV_THRESHOLD
+
+            results[assumption_id] = {
+                "avg_impact": statistics.mean(impacts) if impacts else 0,
+                "avg_uncertainty": statistics.mean(uncertainties) if uncertainties else 0,
+                "avg_feasibility": statistics.mean(feasibilities) if feasibilities else 0,
+                "avg_confidence": statistics.mean(confidences) if confidences else 0,
+                "disagreement": disagreement_flag,
+                "count": len(score_list),
+            }
+
+        return results

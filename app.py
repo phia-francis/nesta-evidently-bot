@@ -25,6 +25,7 @@ from blocks.modals import (
     extract_insights_modal,
     invite_member_modal,
     link_channel_modal,
+    silent_scoring_modal,
 )
 from blocks.methods_ui import method_cards
 from config import Config
@@ -184,10 +185,19 @@ def publish_home_tab(client, user_id: str, active_tab: str = "overview") -> None
     project_data = db_service.get_active_project(user_id)
     metrics = None
     stage_info = None
+    next_best_actions = None
     if project_data:
         metrics = db_service.get_metrics(project_data["id"])
         stage_info = toolkit_service.get_stage_info(project_data["stage"])
-    view = UIManager.get_home_view(user_id, project_data, active_tab, metrics, stage_info)
+        next_best_actions = ai_service.generate_next_best_actions(project_data, metrics)
+    view = UIManager.get_home_view(
+        user_id,
+        project_data,
+        active_tab,
+        metrics,
+        stage_info,
+        next_best_actions,
+    )
     client.views_publish(user_id=user_id, view=view)
 
 
@@ -875,7 +885,7 @@ def open_decision_room(ack, body, client):  # noqa: ANN001
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "Pick a channel to host the voting session. If you don't see it, link a channel from the Home tab first.",
+                        "text": "Pick a channel to host the scoring session. If you don't see it, link a channel from the Home tab first.",
                     },
                 },
                 {
@@ -885,7 +895,7 @@ def open_decision_room(ack, body, client):  # noqa: ANN001
                     "label": {"type": "plain_text", "text": "Channel"},
                 },
             ],
-            "submit": {"type": "plain_text", "text": "Start Voting"},
+            "submit": {"type": "plain_text", "text": "Start Scoring"},
         },
     )
 
@@ -901,26 +911,81 @@ def start_decision_room(ack, body, client, view):  # noqa: ANN001
         client.chat_postEphemeral(channel=user_id, user=user_id, text=f"❌ {message}")
 
 
-@app.action("vote_keep")
-@app.action("vote_kill")
-@app.action("vote_pivot")
-def handle_voting(ack, body, client):  # noqa: ANN001
+@app.action("open_silent_score")
+def open_silent_score(ack, body, client):  # noqa: ANN001
     ack()
-    decision_service.handle_vote(body, client)
+    session_id, assumption_id = body["actions"][0]["value"].split(":")
+    assumption = db_service.get_assumption(int(assumption_id))
+    if not assumption:
+        client.chat_postEphemeral(
+            channel=body["channel"]["id"],
+            user=body["user"]["id"],
+            text="Assumption not found.",
+        )
+        return
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view=silent_scoring_modal(assumption["title"], int(session_id), int(assumption_id)),
+    )
+
+
+@app.view("submit_silent_score")
+def submit_silent_score(ack, body, view, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        session_id_str, assumption_id_str = view["private_metadata"].split(":")
+        session_id = int(session_id_str)
+        assumption_id = int(assumption_id_str)
+        values = view["state"]["values"]
+        impact = int(values["impact_block"]["impact_score"]["selected_option"]["value"])
+        uncertainty = int(values["uncertainty_block"]["uncertainty_score"]["selected_option"]["value"])
+        feasibility = int(values["feasibility_block"]["feasibility_score"]["selected_option"]["value"])
+        confidence = int(values["evidence_block"]["confidence_score"]["selected_option"]["value"])
+        rationale = values.get("rationale_block", {}).get("rationale_text", {}).get("value")
+
+        db_service.record_decision_score(
+            session_id=session_id,
+            assumption_id=assumption_id,
+            user_id=user_id,
+            impact=impact,
+            uncertainty=uncertainty,
+            feasibility=feasibility,
+            confidence=confidence,
+            rationale=rationale,
+        )
+
+        client.chat_postMessage(channel=user_id, text="✅ Your silent score has been saved.")
+    except (KeyError, ValueError) as exc:
+        logger.error("Error parsing silent score submission for user %s: %s", user_id, exc, exc_info=True)
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text="❌ There was an error processing your score. Please try again.",
+        )
 
 
 @app.action("end_decision_session")
 def end_session(ack, body, client):  # noqa: ANN001
     ack()
     session_id = body["actions"][0]["value"]
-    results = db_service.get_session_results(int(session_id))
+    results = decision_service.reveal_scores(int(session_id))
 
-    text = "*🏁 Voting Session Complete!*\n\n"
-    summary_lines = [
-        f"• Assumption {assumption_id}: {votes['keep']} Keep, {votes['pivot']} Pivot, {votes['kill']} Kill"
-        for assumption_id, votes in results.items()
-    ]
-    text += "\n".join(summary_lines)
+    text = "*🏁 Silent Scoring Complete!*\n\n"
+    summary_lines = []
+    for assumption_id, scores in results.items():
+        disagreement = "⚠️ High disagreement" if scores["disagreement"] else "✅ Consensus"
+        summary_lines.append(
+            (
+                f"• Assumption {assumption_id}: "
+                f"Impact {scores['avg_impact']:.1f}, "
+                f"Uncertainty {scores['avg_uncertainty']:.1f}, "
+                f"Feasibility {scores['avg_feasibility']:.1f}, "
+                f"Evidence {scores['avg_confidence']:.0f} "
+                f"({scores['count']} scores) — {disagreement}"
+            )
+        )
+    text += "\n".join(summary_lines) if summary_lines else "No scores were submitted."
 
     client.chat_postMessage(channel=body["channel"]["id"], text=text)
 

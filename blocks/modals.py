@@ -56,6 +56,104 @@ def decision_room_modal() -> dict:
     }
 
 
+SCORE_OPTIONS = [
+    {"text": {"type": "plain_text", "text": f"{i} - {desc}"}, "value": str(i)}
+    for i, desc in [
+        (0, "None"),
+        (1, "Very Low"),
+        (2, "Low"),
+        (3, "Medium"),
+        (4, "High"),
+        (5, "Critical"),
+    ]
+]
+
+EVIDENCE_OPTIONS = [
+    {"text": {"type": "plain_text", "text": f"Level {i} - {desc}"}, "value": str(i)}
+    for i, desc in [
+        (0, "No evidence"),
+        (1, "Light evidence (Say)"),
+        (2, "Light action (Do)"),
+        (3, "Strong action (Do)"),
+        (4, "Market proof"),
+        (5, "Validated"),
+    ]
+]
+
+
+def silent_scoring_modal(assumption_title: str, session_id: int, assumption_id: int) -> dict:
+    """Implements the Silent Scoring phase with multi-criteria ratings."""
+
+    return {
+        "type": "modal",
+        "callback_id": "submit_silent_score",
+        "private_metadata": f"{session_id}:{assumption_id}",
+        "title": {"type": "plain_text", "text": "🗳️ Silent Scoring"},
+        "submit": {"type": "plain_text", "text": "Submit Score"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"Scoring Assumption:\n*{assumption_title}*"},
+            },
+            {"type": "divider"},
+            {
+                "type": "input",
+                "block_id": "impact_block",
+                "label": {"type": "plain_text", "text": "Impact (if true, how big is the win?)"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "impact_score",
+                    "options": SCORE_OPTIONS,
+                    "initial_option": SCORE_OPTIONS[3],
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "uncertainty_block",
+                "label": {"type": "plain_text", "text": "Uncertainty (how much do we NOT know?)"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "uncertainty_score",
+                    "options": SCORE_OPTIONS,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "feasibility_block",
+                "label": {"type": "plain_text", "text": "Feasibility (can we act on it?)"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "feasibility_score",
+                    "options": SCORE_OPTIONS,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "evidence_block",
+                "label": {"type": "plain_text", "text": "Current Evidence Level"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "confidence_score",
+                    "options": EVIDENCE_OPTIONS,
+                    "initial_option": EVIDENCE_OPTIONS[0],
+                },
+            },
+            {
+                "type": "input",
+                "optional": True,
+                "block_id": "rationale_block",
+                "label": {"type": "plain_text", "text": "Rationale (Optional)"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "rationale_text",
+                    "multiline": True,
+                    "placeholder": "Why did you score it this way?",
+                },
+            },
+        ],
+    }
+
 def invite_member_modal() -> dict:
     return {
         "type": "modal",

@@ -28,11 +28,12 @@ def _generate_confidence_meter(score: int) -> str:
 
 def get_ai_summary_block(analysis: dict) -> list:
     """Renders the AI analysis with visual confidence meters and call-to-action buttons."""
+    summary = analysis.get("so_what_summary") or analysis.get("summary") or "Analysis complete."
     blocks: list = [
         {"type": "header", "text": {"type": "plain_text", "text": "✨ Insight Analysis"}},
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*{analysis.get('summary', 'Analysis complete.')}*"},
+            "text": {"type": "mrkdwn", "text": f"*{summary}*"},
         },
         {"type": "divider"},
     ]
@@ -44,8 +45,8 @@ def get_ai_summary_block(analysis: dict) -> list:
             meter = _generate_confidence_meter(item.get("confidence", item.get("confidence_score", 50)))
             category = item.get("category", "Unknown")
             category_icon = {"Opportunity": "🟡", "Capability": "🟢", "Progress": "🔵"}.get(category, "⚪")
-            provenance = item.get("provenance_source") or item.get("source")
-            source_context = item.get("source_id") or item.get("source_ref")
+            provenance = item.get("source_user") or item.get("provenance_source") or item.get("source")
+            source_context = item.get("evidence_snippet") or item.get("source_id") or item.get("source_ref")
             blocks.append(
                 {
                     "type": "section",
@@ -68,7 +69,10 @@ def get_ai_summary_block(analysis: dict) -> list:
                         "elements": [
                             {
                                 "type": "mrkdwn",
-                                "text": f"Source: {provenance or 'Slack thread'}{f' | Ref: {source_context}' if source_context else ''}",
+                                "text": (
+                                    f"Source: {provenance or 'Slack thread'}"
+                                    f"{f' | Evidence: {source_context}' if source_context else ''}"
+                                ),
                             }
                         ],
                     }

@@ -1,19 +1,15 @@
 import asana
-import json
-from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 from config import Config
+from services.google_auth_service import get_google_credentials
 
 
 class IntegrationService:
     def __init__(self) -> None:
         self.drive_service = None
         if Config.GOOGLE_SERVICE_ACCOUNT_JSON:
-            creds_info = json.loads(Config.GOOGLE_SERVICE_ACCOUNT_JSON)
-            creds = service_account.Credentials.from_service_account_info(
-                creds_info, scopes=["https://www.googleapis.com/auth/drive"]
-            )
+            creds = get_google_credentials(["https://www.googleapis.com/auth/drive"])
             self.drive_service = build("drive", "v3", credentials=creds)
 
         self.asana_client = None
