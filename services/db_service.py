@@ -6,14 +6,15 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, inspect
 from sqlalchemy.engine.url import make_url
-from sqlalchemy.orm import declarative_base, joinedload, relationship, sessionmaker
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, declarative_base, joinedload, relationship, sessionmaker
 
 from services.toolkit_service import ToolkitService
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./evidently.db")
 
 
-def _build_engine():
+def _build_engine() -> Engine:
     url = make_url(DATABASE_URL)
     connect_args = {}
 
@@ -36,6 +37,8 @@ class Project(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255))
     description = Column(Text)
+    mission = Column(Text, nullable=True)
+    context_summary = Column(Text, nullable=True)
     status = Column(String(50), default="active")
     stage = Column(String(50), default="Define")
     channel_id = Column(String(50))
@@ -196,7 +199,7 @@ class DbService:
     def _log_schema_status(self) -> None:
         inspector = inspect(engine)
         expected_tables = {
-            "projects": {"stage", "integrations", "channel_id"},
+            "projects": {"stage", "integrations", "channel_id", "mission", "context_summary"},
             "assumptions": {"validation_status", "evidence_density", "source_type", "source_id", "confidence_score"},
             "canvas_items": {"section", "text", "ai_generated"},
         }
@@ -220,6 +223,7 @@ class DbService:
         user_id: str,
         name: str,
         description: str | None = None,
+        mission: str | None = None,
         stage: str = "Define",
         channel_id: str | None = None,
         add_starter_kit: bool = True,
@@ -228,6 +232,7 @@ class DbService:
             project = Project(
                 name=name,
                 description=description or "",
+                mission=mission,
                 stage=stage,
                 created_by=user_id,
                 channel_id=channel_id,
@@ -265,6 +270,49 @@ class DbService:
         with SessionLocal() as db:
             return db.query(Project).filter(Project.created_by == user_id).first()
 
+    def get_project_by_channel(self, channel_id: str) -> Optional[Dict[str, Any]]:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.channel_id == channel_id).first()
+            return self._serialize_project(project) if project else None
+
+    def get_project(self, project_id: int) -> Optional[Dict[str, Any]]:
+        with SessionLocal() as db:
+            project = (
+                db.query(Project)
+                .options(
+                    joinedload(Project.assumptions),
+                    joinedload(Project.experiments),
+                    joinedload(Project.members),
+                    joinedload(Project.canvas_items),
+                )
+                .filter(Project.id == project_id)
+                .first()
+            )
+            return self._serialize_project(project) if project else None
+
+    def get_active_projects(self) -> list[Dict[str, Any]]:
+        with SessionLocal() as db:
+            projects = (
+                db.query(Project)
+                .options(
+                    joinedload(Project.assumptions),
+                    joinedload(Project.experiments),
+                    joinedload(Project.members),
+                    joinedload(Project.canvas_items),
+                )
+                .filter(Project.status == "active")
+                .all()
+            )
+            return [self._serialize_project(project) for project in projects]
+
+    def update_project_context(self, project_id: int, context_summary: str) -> None:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return
+            project.context_summary = context_summary
+            db.commit()
+
     def get_active_project(self, user_id: str) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
             state = db.query(UserState).filter(UserState.user_id == user_id).first()
@@ -295,7 +343,7 @@ class DbService:
             self._set_active_project(db, user_id, project_id)
             db.commit()
 
-    def get_user_projects(self, user_id: str) -> list[dict]:
+    def get_user_projects(self, user_id: str) -> list[dict[str, Any]]:
         with SessionLocal() as db:
             memberships = db.query(ProjectMember).options(joinedload(ProjectMember.project)).filter(
                 ProjectMember.user_id == user_id
@@ -491,6 +539,30 @@ class DbService:
             db.refresh(assumption)
             return assumption
 
+    def find_similar_assumption(
+        self,
+        project_id: int,
+        title: str,
+        threshold: float = 0.9,
+    ) -> Optional[str]:
+        """Return a similar assumption title if similarity exceeds threshold."""
+        if not title:
+            return None
+        words = set(title.lower().split())
+        if not words:
+            return None
+        with SessionLocal() as db:
+            assumptions = db.query(Assumption).filter(Assumption.project_id == project_id).all()
+            for assumption in assumptions:
+                existing = (assumption.title or "").lower().split()
+                if not existing:
+                    continue
+                overlap = words.intersection(existing)
+                score = len(overlap) / max(len(words), len(existing))
+                if score >= threshold:
+                    return assumption.title
+        return None
+
     def update_assumption_lane(self, assumption_id: int, lane: str) -> None:
         with SessionLocal() as db:
             assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
@@ -528,6 +600,12 @@ class DbService:
     def get_experiment(self, experiment_id: int) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
             experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+            return self._serialize_experiment(experiment) if experiment else None
+
+    def get_experiment_by_asana_task_id(self, task_id: str) -> Optional[Dict[str, Any]]:
+        """Fetch an experiment linked to an Asana task."""
+        with SessionLocal() as db:
+            experiment = db.query(Experiment).filter(Experiment.dataset_link == f"asana:{task_id}").first()
             return self._serialize_experiment(experiment) if experiment else None
 
     def get_assumption(self, assumption_id: int) -> Optional[Dict[str, Any]]:
@@ -580,7 +658,7 @@ class DbService:
                 results[score.assumption_id].append(score)
             return dict(results)
 
-    def _set_active_project(self, db, user_id: str, project_id: int) -> None:
+    def _set_active_project(self, db: Session, user_id: str, project_id: int) -> None:
         state = db.query(UserState).filter(UserState.user_id == user_id).first()
         if not state:
             state = UserState(user_id=user_id)
@@ -592,6 +670,8 @@ class DbService:
             "id": project.id,
             "name": project.name,
             "description": project.description,
+            "mission": project.mission,
+            "context_summary": project.context_summary,
             "status": project.status,
             "stage": project.stage,
             "channel_id": project.channel_id,
@@ -630,6 +710,7 @@ class DbService:
     def _serialize_experiment(self, experiment: Experiment) -> Dict[str, Any]:
         return {
             "id": experiment.id,
+            "project_id": experiment.project_id,
             "title": experiment.title,
             "hypothesis": experiment.hypothesis,
             "method": experiment.method,

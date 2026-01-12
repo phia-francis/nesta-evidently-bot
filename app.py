@@ -1,21 +1,39 @@
 import io
+import json
 import logging
 import re
 import threading
 import time
+from datetime import date
+from pathlib import Path
+from urllib import error as url_error
+from urllib import request as url_request
 from aiohttp import web
+from apscheduler.schedulers.background import BackgroundScheduler
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from blocks.ui_manager import UIManager
+from constants import (
+    HELP_ANALYSIS,
+    HELP_HEADER,
+    HELP_INTERVIEW,
+    HELP_SETUP,
+    HELP_TOOLKIT,
+    HELP_WELCOME,
+    PUBLIC_HOLIDAYS,
+    WELCOME_GREETING,
+    WELCOME_USAGE,
+)
 from blocks.interactions import (
     case_study_modal,
     error_block,
     get_ai_summary_block,
     get_loading_block,
 )
+from blocks.modal_factory import ModalFactory
 from blocks.nesta_ui import NestaUI
 from blocks.onboarding import get_setup_step_1_modal, get_setup_step_2_modal
 from blocks.modals import (
@@ -31,18 +49,25 @@ from blocks.modals import (
 )
 from blocks.methods_ui import method_cards
 from config import Config
+from config_manager import ConfigManager
 from services import knowledge_base
 from services.ai_service import EvidenceAI
 from services.db_service import DbService
 from services.decision_service import DecisionRoomService
+from services.backup_service import BackupService
 from services.google_workspace_service import GoogleWorkspaceService
 from services.integration_service import IntegrationService
+from services.ingestion_service import IngestionService
+from services.messenger_service import MessengerService
 from services.playbook_service import PlaybookService
+from services.sync_service import TwoWaySyncService
 from services.toolkit_service import ToolkitService
 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+ConfigManager().validate()
 
 app = App(token=Config.SLACK_BOT_TOKEN, signing_secret=Config.SLACK_SIGNING_SECRET)
 ai_service = EvidenceAI()
@@ -51,11 +76,91 @@ decision_service = DecisionRoomService(db_service)
 playbook = PlaybookService()
 integration_service = IntegrationService()
 toolkit_service = ToolkitService()
+ingestion_service = IngestionService()
+sync_service = TwoWaySyncService()
+messenger_service = MessengerService(app.client)
+backup_service = BackupService()
 try:
     google_workspace_service = GoogleWorkspaceService()
 except Exception:  # noqa: BLE001
     logging.warning("Google Workspace credentials missing; exports disabled.")
     google_workspace_service = None
+
+
+# --- WORKFLOW STEP: LOG EVIDENCE ---
+
+# 1. Define the Step
+ws = app.step("log_evidence")
+
+
+# 2. Configuration Modal (User sees this when building the workflow)
+@ws.edit
+def edit_log_evidence(ack, step, configure):  # noqa: ANN001
+    ack()
+    configure(
+        blocks=[
+            {
+                "type": "input",
+                "block_id": "project_block",
+                "label": {"type": "plain_text", "text": "Project Name"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "project_name",
+                    "placeholder": {"type": "plain_text", "text": "e.g. Healthy Start"},
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "evidence_block",
+                "label": {"type": "plain_text", "text": "Evidence Data"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "evidence_text",
+                    "placeholder": {
+                        "type": "plain_text",
+                        "text": "Insert variable here (e.g. form response)",
+                    },
+                },
+            },
+        ],
+    )
+
+
+# 3. Save Configuration
+@ws.save
+def save_log_evidence(ack, view, update):  # noqa: ANN001
+    ack()
+    values = view["state"]["values"]
+    project_name = values["project_block"]["project_name"]["value"]
+    evidence_text = values["evidence_block"]["evidence_text"]["value"]
+
+    update(
+        inputs={
+            "project_name": {"value": project_name},
+            "evidence_text": {"value": evidence_text},
+        },
+    )
+
+
+# 4. Execution (Runs when the workflow triggers)
+@ws.execute
+def execute_log_evidence(step, complete, fail):  # noqa: ANN001
+    inputs = step["inputs"]
+    project_name = inputs["project_name"]["value"]
+    evidence_text = inputs["evidence_text"]["value"]
+
+    try:
+        # Logic: Find project and add to 'Inbox' or 'Canvas'
+        # project = db.find_project(name=project_name)
+        # db.add_evidence(project.id, evidence_text)
+
+        # Simulating success for now
+        print(f"✅ Workflow Logged Evidence for {project_name}: {evidence_text}")
+
+        complete(outputs={"status": "success"})
+
+    except Exception as exc:  # noqa: BLE001
+        fail(error={"message": str(exc)})
 
 
 CHANNEL_TAB_TEMPLATES = {
@@ -67,43 +172,35 @@ CHANNEL_TAB_TEMPLATES = {
 
 def get_help_manual_blocks():
     return [
-        {"type": "header", "text": {"type": "plain_text", "text": "📘 Evidently Instruction Manual"}},
-        {"type": "section", "text": {"type": "mrkdwn", "text": "*Welcome to your AI Innovation Assistant.*"}},
+        {"type": "header", "text": {"type": "plain_text", "text": HELP_HEADER}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": HELP_WELCOME}},
         {"type": "divider"},
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": (
-                    "*1. Setup & Projects*\n"
-                    "Type `/evidently-status` to see your current project health. "
-                    "Go to the Home Tab to switch projects."
-                ),
+                "text": HELP_SETUP,
             },
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*2. The Toolkit*\nType `/evidently-methods [stage]` (e.g., 'discovery') to get method cards.",
+                "text": HELP_TOOLKIT,
             },
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": (
-                    "*3. Rapid Interviewing*\n"
-                    f"Type `/evidently-ask [method]` (e.g., '{ToolkitService.DEFAULT_METHOD_NAME}') "
-                    "to get a script of questions instantly."
-                ),
+                "text": HELP_INTERVIEW.format(default_method=ToolkitService.DEFAULT_METHOD_NAME),
             },
         },
         {
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "*4. Analysis*\nReply to any thread with `@Evidently` to extract insights.",
+                "text": HELP_ANALYSIS,
             },
         },
         {
@@ -121,13 +218,16 @@ def get_help_manual_blocks():
 
 
 def get_project_status_blocks(project, metrics, user_id):
+    score = int(project.get("innovation_score", 0))
+    filled = min(5, max(0, round(score / 20)))
+    progress_bar = "🟩" * filled + "⬜" * (5 - filled)
     return [
         {"type": "header", "text": {"type": "plain_text", "text": f"🚀 Project Status: {project['name']}"}},
         {
             "type": "section",
             "fields": [
                 {"type": "mrkdwn", "text": f"*Current Stage:*\n{project['stage']}"},
-                {"type": "mrkdwn", "text": f"*Innovation Score:*\n{project.get('innovation_score', 0)}/100"},
+                {"type": "mrkdwn", "text": f"*Innovation Score:*\n{progress_bar} {score}%"},
             ],
         },
         {"type": "divider"},
@@ -154,6 +254,63 @@ def get_ask_blocks(method_name, formatted_questions):
 def run_in_background(target, *args, **kwargs) -> None:
     thread = threading.Thread(target=target, args=args, kwargs=kwargs, daemon=True)
     thread.start()
+
+
+def download_private_file(url: str) -> bytes | None:
+    request = url_request.Request(url, headers={"Authorization": f"Bearer {Config.SLACK_BOT_TOKEN}"})
+    try:
+        with url_request.urlopen(request, timeout=20) as response:  # noqa: S310
+            return response.read()
+    except url_error.URLError:
+        logger.exception("Failed to download file")
+        return None
+
+
+async def handle_asana_webhook(request: web.Request) -> web.Response:
+    """Handle Asana webhook events and sync experiment status."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    events = payload.get("events", [])
+    for event in events:
+        task = event.get("resource", {})
+        task_id = task.get("gid")
+        if not task_id:
+            continue
+        if event.get("action") not in {"changed", "added"}:
+            continue
+        if event.get("resource_type") != "task":
+            continue
+        change = event.get("change", {})
+        if change.get("field") not in {"completed", "is_completed"}:
+            continue
+        completed_value = change.get("value")
+        if completed_value is None:
+            completed_value = change.get("new_value")
+        if completed_value is not True:
+            continue
+
+        experiment = db_service.get_experiment_by_asana_task_id(task_id)
+        if not experiment:
+            continue
+        decision = sync_service.resolve_status_conflict(experiment.get("status", ""), True)
+        project = db_service.get_project(experiment["project_id"])
+        if decision["action"] == "update_experiment":
+            db_service.update_experiment(experiment["id"], status="Completed")
+            if project and project.get("channel_id"):
+                messenger_service.post_message(
+                    channel=project["channel_id"],
+                    text="✅ Task completed in Asana -> Experiment marked as Done in Slack.",
+                )
+        elif decision["action"] == "conflict" and project and project.get("channel_id"):
+            messenger_service.post_message(
+                channel=project["channel_id"],
+                text=f"⚠️ Sync conflict: {decision['message']}",
+            )
+
+    return web.json_response({"ok": True})
 
 
 def run_thread_analysis(client, channel_id: str, thread_ts: str, logger):  # noqa: ANN001
@@ -206,6 +363,11 @@ def run_thread_analysis(client, channel_id: str, thread_ts: str, logger):  # noq
                     text="Analysis failed",
                 )
                 return
+
+            project = db_service.get_project_by_channel(channel_id)
+            if project:
+                context_summary = ai_service.summarize_thread([m.get("text", "") for m in messages if m.get("text")])
+                db_service.update_project_context(project["id"], context_summary)
 
             client.chat_update(
                 channel=channel_id,
@@ -274,7 +436,24 @@ def update_home_tab(client, event, logger):  # noqa: ANN001
         logger.error("Error publishing home tab: %s", exc, exc_info=True)
 
 
-def publish_home_tab(client, user_id: str, active_tab: str = "overview") -> None:
+@app.action("experiments_page_next")
+@app.action("experiments_page_prev")
+def handle_experiment_page_action(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        page = int(body["actions"][0]["value"])
+    except (TypeError, ValueError):
+        page = 0
+    publish_home_tab_async(client, user_id, "overview", experiment_page=max(page, 0))
+
+
+def publish_home_tab(
+    client,
+    user_id: str,
+    active_tab: str = "overview",
+    experiment_page: int = 0,
+) -> None:
     project_data = db_service.get_active_project(user_id)
     metrics = None
     stage_info = None
@@ -293,11 +472,17 @@ def publish_home_tab(client, user_id: str, active_tab: str = "overview") -> None
         metrics,
         stage_info,
         next_best_actions,
+        experiment_page,
     )
     client.views_publish(user_id=user_id, view=view)
 
 
-def publish_home_tab_async(client, user_id: str, active_tab: str = "overview") -> None:
+def publish_home_tab_async(
+    client,
+    user_id: str,
+    active_tab: str = "overview",
+    experiment_page: int = 0,
+) -> None:
     project_data = db_service.get_active_project(user_id)
     metrics = None
     stage_info = None
@@ -314,6 +499,7 @@ def publish_home_tab_async(client, user_id: str, active_tab: str = "overview") -
         metrics,
         stage_info,
         next_best_actions=None,
+        experiment_page=experiment_page,
     )
     client.views_publish(user_id=user_id, view=view)
 
@@ -331,6 +517,7 @@ def publish_home_tab_async(client, user_id: str, active_tab: str = "overview") -
                 metrics,
                 stage_info,
                 next_best_actions,
+                experiment_page,
             )
             client.views_publish(user_id=user_id, view=refreshed_view)
         except Exception:
@@ -549,6 +736,241 @@ def handle_ask_command(ack, body, client):  # noqa: ANN001
         blocks=blocks,
         text=f"{method_name} questions",
     )
+
+
+@app.command("/evidently-scout")
+def handle_scout_command(ack, body, client):  # noqa: ANN001
+    """AI Research Assistant that finds competitors and market risks."""
+    ack()
+    user_id = body["user_id"]
+    channel_id = body["channel_id"]
+    region = body.get("text", "").strip() or "Global"
+    project = db_service.get_active_project(user_id)
+
+    if not project:
+        client.chat_postEphemeral(channel=channel_id, user=user_id, text="No active project found.")
+        return
+
+    problem_statement = (project.get("description") or "").strip()
+    if not problem_statement:
+        client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text="Add a project description before running Market Scout.",
+        )
+        return
+
+    client.chat_postEphemeral(
+        channel=channel_id,
+        user=user_id,
+        text="🕵️ Scouting the market... analyzing competitors and risks...",
+    )
+
+    analysis = ai_service.scout_market(problem_statement, region=region)
+    competitors = analysis.get("competitors", [])
+    risks = analysis.get("risks", [])
+    competitors_text = "\n".join([f"• {item}" for item in competitors]) or "No competitors returned."
+    risks_text = "\n".join([f"• {item}" for item in risks]) or "No risks returned."
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"🕵️ Market Scout: {project['name']}"}},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "*Based on your problem statement, here is the landscape:*",
+            },
+        },
+        {"type": "divider"},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"⚔️ *Potential Competitors:*\n{competitors_text}"}},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"⚠️ *Market Risks:*\n{risks_text}"}},
+    ]
+
+    if analysis.get("raw") and not competitors and not risks:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Raw output:*\n{analysis['raw']}"},
+            }
+        )
+
+    client.chat_postMessage(channel=channel_id, blocks=blocks, text="Market scout results")
+
+
+@app.event("file_shared")
+def handle_setup_files(event, client, logger):  # noqa: ANN001
+    file_id = event.get("file_id")
+    user_id = event.get("user_id")
+    if not file_id or not user_id:
+        return
+
+    file_info = client.files_info(file=file_id).get("file", {})
+    channels = file_info.get("channels", [])
+    if not channels:
+        return
+
+    channel_id = channels[0]
+    messenger_service.post_ephemeral(
+        channel=channel_id,
+        user=user_id,
+        text=f"📄 I see you uploaded *{file_info.get('name', 'a file')}*. Want me to auto-fill your Canvas?",
+        blocks=ModalFactory.file_analysis_prompt(file_info.get("name", "this file"), file_id),
+    )
+
+
+@app.action("ignore_file")
+def ignore_file_upload(ack):  # noqa: ANN001
+    ack()
+
+
+@app.action("analyze_file")
+def process_file_analysis(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    file_id = body["actions"][0]["value"]
+    channel_id = body["channel"]["id"]
+    user_id = body["user"]["id"]
+
+    messenger_service.post_ephemeral(
+        channel=channel_id,
+        user=user_id,
+        text="🧠 Reading document... extracting assumptions...",
+    )
+
+    file_info = client.files_info(file=file_id).get("file", {})
+    download_url = file_info.get("url_private_download")
+    if not download_url:
+        messenger_service.post_ephemeral(channel=channel_id, user=user_id, text="I couldn't access that file.")
+        return
+
+    file_content = download_private_file(download_url)
+    if not file_content:
+        messenger_service.post_ephemeral(channel=channel_id, user=user_id, text="I couldn't download that file.")
+        return
+
+    file_type = file_info.get("mimetype", "")
+    extraction = ingestion_service.extract_text_payload(file_content, file_type)
+    if extraction.get("error"):
+        messenger_service.post_ephemeral(
+            channel=channel_id,
+            user=user_id,
+            text=extraction["error"],
+        )
+        return
+
+    chunks = extraction.get("chunks", [])
+    context_text = "\n".join(chunks[:3]) if chunks else extraction.get("text", "")
+    analysis = ai_service.generate_canvas_from_doc(context_text)
+    project = db_service.get_active_project(user_id)
+    if not project:
+        messenger_service.post_ephemeral(channel=channel_id, user=user_id, text="No active project found.")
+        return
+
+    canvas_data = analysis.get("canvas_data", {})
+    gaps = analysis.get("gaps_identified", [])
+    follow_ups = analysis.get("follow_up_questions", [])
+    summary_blocks = ModalFactory.document_insights_blocks(canvas_data, gaps, follow_ups)
+    messenger_service.post_message(channel=channel_id, blocks=summary_blocks, text="Document insights")
+
+    if canvas_data.get("problem"):
+        db_service.add_canvas_item(project["id"], "Opportunity", canvas_data["problem"], is_ai=True)
+    if canvas_data.get("solution"):
+        db_service.add_canvas_item(project["id"], "Capability", canvas_data["solution"], is_ai=True)
+    if canvas_data.get("users"):
+        db_service.add_canvas_item(
+            project["id"],
+            "Opportunity",
+            "Target users: " + ", ".join(canvas_data["users"]),
+            is_ai=True,
+        )
+
+    for risk in canvas_data.get("risks", []):
+        payload = json.dumps({"project_id": project["id"], "risk": risk})
+        messenger_service.post_message(
+            channel=channel_id,
+            text="Review Assumption",
+            blocks=ModalFactory.suggested_assumption_blocks(risk, payload),
+        )
+
+
+@app.action("accept_suggestion")
+def accept_suggestion(ack, body, client):  # noqa: ANN001
+    ack()
+    payload = json.loads(body["actions"][0]["value"])
+    similar_title = db_service.find_similar_assumption(payload["project_id"], payload["risk"])
+    if similar_title:
+        messenger_service.post_ephemeral(
+            channel=body["channel"]["id"],
+            user=body["user"]["id"],
+            text=f"⚠️ This looks similar to: “{similar_title}”.",
+        )
+    db_service.create_assumption(payload["project_id"], {"title": payload["risk"]})
+    messenger_service.post_ephemeral(
+        channel=body["channel"]["id"],
+        user=body["user"]["id"],
+        text="✅ Added to your assumption board.",
+    )
+
+
+@app.action("reject_suggestion")
+def reject_suggestion(ack, body, client):  # noqa: ANN001
+    ack()
+    client.chat_postEphemeral(
+        channel=body["channel"]["id"],
+        user=body["user"]["id"],
+        text="Ignored that suggestion.",
+    )
+
+
+@app.action("edit_suggestion")
+def edit_suggestion(ack, body, client):  # noqa: ANN001
+    ack()
+    payload = body["actions"][0]["value"]
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "edit_suggestion_submit",
+            "private_metadata": payload,
+            "title": {"type": "plain_text", "text": "Edit Assumption"},
+            "submit": {"type": "plain_text", "text": "Save"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "risk_block",
+                    "label": {"type": "plain_text", "text": "Assumption"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "risk_input",
+                        "initial_value": json.loads(payload)["risk"],
+                    },
+                }
+            ],
+        },
+    )
+
+
+@app.view("edit_suggestion_submit")
+def handle_edit_suggestion_submit(ack, body, client):  # noqa: ANN001
+    ack()
+    payload = json.loads(body["view"]["private_metadata"])
+    values = body["view"]["state"]["values"]
+    risk_text = values["risk_block"]["risk_input"]["value"]
+    similar_title = db_service.find_similar_assumption(payload["project_id"], risk_text)
+    response = client.conversations_open(users=body["user"]["id"])
+    dm_channel = response.get("channel", {}).get("id")
+
+    if similar_title and dm_channel:
+        messenger_service.post_ephemeral(
+            channel=dm_channel,
+            user=body["user"]["id"],
+            text=f"⚠️ This looks similar to: “{similar_title}”."
+        )
+
+    db_service.create_assumption(payload["project_id"], {"title": risk_text})
+
+    if dm_channel:
+        client.chat_postMessage(channel=dm_channel, text="✅ Added the edited assumption.")
 
 
 @app.view("setup_final_submit")
@@ -1025,8 +1447,8 @@ def connect_drive(ack, body, client, logger):  # noqa: ANN001
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
         return
     folder = integration_service.create_drive_folder(project["name"])
-    if not folder:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="Google Drive is not configured.")
+    if folder.get("error"):
+        client.chat_postEphemeral(channel=user_id, user=user_id, text=folder["error"])
         return
     db_service.add_integration_link(project["id"], "drive", folder["id"])
     client.chat_postEphemeral(
@@ -1053,8 +1475,8 @@ def connect_asana(ack, body, client, logger):  # noqa: ANN001
         )
         return
     asana_project = integration_service.create_asana_project(project["name"], Config.ASANA_WORKSPACE_ID)
-    if not asana_project:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="Asana is not configured.")
+    if asana_project.get("error"):
+        client.chat_postEphemeral(channel=user_id, user=user_id, text=asana_project["error"])
         return
     db_service.add_integration_link(project["id"], "asana", asana_project["id"])
     client.chat_postEphemeral(
@@ -1063,6 +1485,115 @@ def connect_asana(ack, body, client, logger):  # noqa: ANN001
         text=f"Asana project created: {asana_project['link']}",
     )
     publish_home_tab_async(client, user_id, "team:integrations")
+
+
+def check_asana_alignment(project: dict, channel_id: str, client) -> None:  # noqa: ANN001
+    integrations = project.get("integrations", {})
+    asana_project_id = integrations.get("asana", {}).get("project_id")
+    if not asana_project_id:
+        client.chat_postMessage(channel=channel_id, text="Asana is not connected for this project.")
+        return
+
+    tasks_response = integration_service.get_asana_tasks(asana_project_id)
+    if tasks_response.get("error"):
+        client.chat_postMessage(channel=channel_id, text=tasks_response["error"])
+        return
+    task_names = [task.get("name", "") for task in tasks_response.get("tasks", [])]
+
+    history = client.conversations_history(channel=channel_id, limit=50)
+    messages = history.get("messages", [])
+    conversation_text = "\n".join([message.get("text", "") for message in messages if message.get("text")])
+    action_items = ai_service.extract_action_items(conversation_text) if conversation_text else []
+
+    missing_items = []
+    for item in action_items:
+        if not any(item.lower() in task.lower() or task.lower() in item.lower() for task in task_names):
+            missing_items.append(item)
+
+    if not missing_items:
+        client.chat_postMessage(
+            channel=channel_id,
+            text="✅ Asana looks aligned with recent chat.",
+        )
+        return
+
+    missing_items = missing_items[:5]
+    payload = json.dumps({"project_id": project["id"], "items": missing_items})
+    client.chat_postMessage(
+        channel=channel_id,
+        text="📋 Project Alignment Check",
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "I noticed we discussed these items, but they aren't in Asana yet:",
+                },
+            },
+            {"type": "section", "text": {"type": "mrkdwn", "text": "\n".join([f"• {item}" for item in missing_items])}},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Sync All to Asana"},
+                        "action_id": "bulk_sync_asana",
+                        "value": payload,
+                        "style": "primary",
+                    }
+                ],
+            },
+        ],
+    )
+
+
+@app.command("/evidently-asana-check")
+def handle_asana_check_command(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user_id"]
+    channel_id = body["channel_id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=channel_id, user=user_id, text="Please create a project first.")
+        return
+    check_asana_alignment(project, channel_id, client)
+
+
+@app.action("bulk_sync_asana")
+def handle_bulk_sync_asana(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    payload = json.loads(body["actions"][0]["value"])
+    project = db_service.get_project(payload["project_id"])
+    if not project:
+        client.chat_postEphemeral(
+            channel=body["channel"]["id"],
+            user=body["user"]["id"],
+            text="Project not found.",
+        )
+        return
+
+    synced = 0
+    for item in payload.get("items", []):
+        asana_task = integration_service.create_asana_task(
+            project_name=project["name"],
+            task_name=item,
+            description=f"Auto-synced from Slack: {item}",
+        )
+        if asana_task.get("error"):
+            client.chat_postEphemeral(
+                channel=body["channel"]["id"],
+                user=body["user"]["id"],
+                text=asana_task["error"],
+            )
+            continue
+        if asana_task.get("link"):
+            synced += 1
+
+    client.chat_postEphemeral(
+        channel=body["channel"]["id"],
+        user=body["user"]["id"],
+        text=f"✅ Synced {synced} items to Asana.",
+    )
 
 
 @app.action("export_report")
@@ -1128,6 +1659,67 @@ def handle_export_report(ack, body, client):  # noqa: ANN001
     )
 
 
+@app.action("broadcast_update")
+def handle_broadcast_update(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=body["channel"]["id"], user=user_id, text="Please create a project first.")
+        return
+
+    metrics = db_service.get_metrics(project["id"])
+    leadership_channel = Config.LEADERSHIP_CHANNEL
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"📢 Innovation Update: {project['name']}"},
+        },
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*Mission:* {project.get('mission', 'General')}"},
+                {"type": "mrkdwn", "text": f"*Stage:* {project['stage']}"},
+            ],
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "*Latest Wins:*\n"
+                    f"We validated {metrics.get('validated', 0)} key assumptions this week. "
+                    f"The team is currently testing _'{metrics.get('latest_experiment', 'N/A')}'_."
+                ),
+            },
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "*Blockers / Needs:*\nNeed approval for budget to proceed to Alpha."},
+        },
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f"Posted by <@{user_id}> via Evidently"}],
+        },
+    ]
+
+    try:
+        client.chat_postMessage(channel=leadership_channel, blocks=blocks)
+        client.chat_postEphemeral(
+            channel=body["channel"]["id"],
+            user=user_id,
+            text=f"✅ Update posted to {leadership_channel}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to broadcast update", exc_info=True)
+        client.chat_postEphemeral(
+            channel=body["channel"]["id"],
+            user=user_id,
+            text=f"❌ Could not post to leadership channel: {exc}",
+        )
+
+
 @app.view("create_assumption_submit")
 def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
     ack()
@@ -1147,6 +1739,14 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
         if not project:
             client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
             return
+
+        similar_title = db_service.find_similar_assumption(project["id"], title)
+        if similar_title:
+            messenger_service.post_ephemeral(
+                channel=user_id,
+                user=user_id,
+                text=f"⚠️ This looks similar to an existing assumption: “{similar_title}”.",
+            )
 
         db_service.create_assumption(
             project_id=project["id"],
@@ -1409,24 +2009,13 @@ def handle_create_experiment(ack, body, client, logger):  # noqa: ANN001
         logger.error("Failed to create experiment: %s", exc, exc_info=True)
 
 
-@app.action("update_experiment")
-def open_update_experiment_modal(ack, body, client):  # noqa: ANN001
-    ack()
-    experiment_id = int(body["actions"][0]["value"])
-    experiment = db_service.get_experiment(experiment_id)
-    if not experiment:
-        client.chat_postEphemeral(
-            channel=body["user"]["id"],
-            user=body["user"]["id"],
-            text="That experiment could not be found.",
-        )
-        return
-
+def open_update_experiment_modal(client, trigger_id: str, experiment: dict) -> None:  # noqa: ANN001
     status_options = [
         {"text": {"type": "plain_text", "text": "Planning"}, "value": "Planning"},
         {"text": {"type": "plain_text", "text": "🟢 Live"}, "value": "Live"},
         {"text": {"type": "plain_text", "text": "✅ Completed"}, "value": "Completed"},
         {"text": {"type": "plain_text", "text": "🛑 Paused"}, "value": "Paused"},
+        {"text": {"type": "plain_text", "text": "📦 Archived"}, "value": "Archived"},
     ]
     status_option = next(
         (option for option in status_options if option["value"] == experiment.get("status")),
@@ -1434,11 +2023,11 @@ def open_update_experiment_modal(ack, body, client):  # noqa: ANN001
     )
 
     client.views_open(
-        trigger_id=body["trigger_id"],
+        trigger_id=trigger_id,
         view={
             "type": "modal",
             "callback_id": "update_experiment_submit",
-            "private_metadata": str(experiment_id),
+            "private_metadata": str(experiment["id"]),
             "title": {"type": "plain_text", "text": "Update Status"},
             "blocks": [
                 {
@@ -1469,6 +2058,21 @@ def open_update_experiment_modal(ack, body, client):  # noqa: ANN001
     )
 
 
+@app.action("update_experiment")
+def open_update_experiment_modal_action(ack, body, client):  # noqa: ANN001
+    ack()
+    experiment_id = int(body["actions"][0]["value"])
+    experiment = db_service.get_experiment(experiment_id)
+    if not experiment:
+        client.chat_postEphemeral(
+            channel=body["user"]["id"],
+            user=body["user"]["id"],
+            text="That experiment could not be found.",
+        )
+        return
+    open_update_experiment_modal(client, body["trigger_id"], experiment)
+
+
 @app.view("update_experiment_submit")
 def handle_update_experiment_submit(ack, body, client, logger):  # noqa: ANN001
     ack()
@@ -1487,9 +2091,191 @@ def handle_update_experiment_submit(ack, body, client, logger):  # noqa: ANN001
                 channel=project["channel_id"],
                 text=f"{status_emoji} *Experiment Update: {status}*",
             )
+            if status == "Live":
+                experiment = db_service.get_experiment(experiment_id)
+                if experiment:
+                    description = (
+                        f"Hypothesis: {experiment.get('hypothesis', '—')}\n"
+                        f"Method: {experiment.get('method', '—')}\n"
+                        f"Current KPI: {experiment.get('primary_kpi', '—')}"
+                    )
+                    asana_task = integration_service.create_asana_task(
+                        project_name=project["name"],
+                        task_name=experiment.get("title", "Experiment"),
+                        description=description,
+                    )
+                    if asana_task.get("error"):
+                        client.chat_postEphemeral(
+                            channel=project["channel_id"],
+                            user=user_id,
+                            text=asana_task["error"],
+                        )
+                    elif asana_task.get("link"):
+                        if asana_task.get("task_id"):
+                            db_service.update_experiment(
+                                experiment_id,
+                                data={"dataset_link": f"asana:{asana_task['task_id']}"},
+                            )
+                        client.chat_postMessage(
+                            channel=project["channel_id"],
+                            text=f"✅ Synced to Asana: <{asana_task['link']}|View Task>",
+                        )
         publish_home_tab_async(client, user_id, "experiments:active")
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to update experiment: %s", exc, exc_info=True)
+
+
+@app.action("experiment_overflow")
+def handle_experiment_overflow(ack, body, client):  # noqa: ANN001
+    ack()
+    selection = body["actions"][0]["selected_option"]["value"]
+    action_type, experiment_id = selection.split(":", 1)
+    experiment = db_service.get_experiment(int(experiment_id))
+    if not experiment:
+        client.chat_postEphemeral(
+            channel=body["user"]["id"],
+            user=body["user"]["id"],
+            text="That experiment could not be found.",
+        )
+        return
+
+    if action_type == "edit":
+        open_update_experiment_modal(client, body["trigger_id"], experiment)
+        return
+    if action_type == "archive":
+        db_service.update_experiment(experiment["id"], status="Archived")
+        client.chat_postMessage(
+            channel=body["channel"]["id"],
+            text=f"📦 Archived experiment: {experiment.get('title', 'Untitled')}.",
+        )
+        return
+    if action_type == "sync":
+        project = db_service.get_active_project(body["user"]["id"])
+        if not project:
+            client.chat_postEphemeral(
+                channel=body["channel"]["id"],
+                user=body["user"]["id"],
+                text="Please create a project first.",
+            )
+            return
+        description = (
+            f"Hypothesis: {experiment.get('hypothesis', '—')}\n"
+            f"Method: {experiment.get('method', '—')}\n"
+            f"Current KPI: {experiment.get('primary_kpi', '—')}"
+        )
+        asana_task = integration_service.create_asana_task(
+            project_name=project["name"],
+            task_name=experiment.get("title", "Experiment"),
+            description=description,
+        )
+        if asana_task.get("error"):
+            client.chat_postEphemeral(
+                channel=body["channel"]["id"],
+                user=body["user"]["id"],
+                text=asana_task["error"],
+            )
+            return
+        if asana_task.get("task_id"):
+            db_service.update_experiment(
+                experiment["id"],
+                data={"dataset_link": f"asana:{asana_task['task_id']}"},
+            )
+        if asana_task.get("link"):
+            client.chat_postMessage(
+                channel=body["channel"]["id"],
+                text=f"✅ Synced to Asana: <{asana_task['link']}|View Task>",
+            )
+
+
+@app.action("draft_experiment_from_chat")
+def handle_draft_experiment_from_chat(ack, body, client):  # noqa: ANN001
+    ack()
+    hypothesis_text = body["actions"][0]["value"]
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "create_experiment_submit",
+            "title": {"type": "plain_text", "text": "New Experiment"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "title_block",
+                    "label": {"type": "plain_text", "text": "Experiment Title"},
+                    "element": {"type": "plain_text_input", "action_id": "title"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "method_block",
+                    "label": {"type": "plain_text", "text": "Method"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "method",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "Fake Door"}, "value": "Fake Door"},
+                            {
+                                "text": {"type": "plain_text", "text": ToolkitService.DEFAULT_METHOD_NAME},
+                                "value": ToolkitService.DEFAULT_METHOD_NAME,
+                            },
+                            {"text": {"type": "plain_text", "text": "A/B Test"}, "value": "A/B Test"},
+                            {"text": {"type": "plain_text", "text": "Concierge MVP"}, "value": "Concierge MVP"},
+                        ],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "hypothesis_block",
+                    "label": {"type": "plain_text", "text": "Hypothesis"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "hypothesis",
+                        "multiline": True,
+                        "initial_value": hypothesis_text,
+                    },
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Launch Experiment"},
+        },
+    )
+
+
+@app.event("message")
+def passive_listener(event, client, logger):  # noqa: ANN001
+    if event.get("subtype") or event.get("bot_id"):
+        return
+    text = event.get("text", "").lower()
+    if not text:
+        return
+    if "we should test" in text or "hypothesis" in text:
+        client.chat_postEphemeral(
+            channel=event["channel"],
+            user=event["user"],
+            text="🕵️ I detected a new hypothesis!",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            "It sounds like you're formulating a new test. "
+                            "Want me to add this to the *Experiment Board*?"
+                        ),
+                    },
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Draft Experiment"},
+                            "value": event.get("text", "")[:1900],
+                            "action_id": "draft_experiment_from_chat",
+                        }
+                    ],
+                },
+            ],
+        )
 
 
 # --- 2. 'SO WHAT?' AI SUMMARISER WITH LIVE STATUS ---
@@ -1505,20 +2291,14 @@ def handle_channel_join(event, say, client, logger):  # noqa: ANN001
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": "👋 *Thanks for adding me!* I'm Evidently, your AI innovation assistant.",
+                            "text": WELCOME_GREETING,
                         },
                     },
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": (
-                                "Here is how you can use me in this channel:\n\n"
-                                "🧵 *Analyse Threads:* Reply to any thread and mention `@Evidently` to extract "
-                                "hypotheses and evidence.\n"
-                                "⚡ *Shortcuts:* Click the `...` on any message → `Apps` → `Extract Insights`.\n"
-                                "🛠 *Toolkit:* Type `/evidently-methods` to get rapid suggestions for your current stage."
-                            ),
+                            "text": WELCOME_USAGE,
                         },
                     },
                     {
@@ -1938,6 +2718,120 @@ def handle_nudge_command(ack, respond):  # noqa: ANN001
     respond("Use the nudges in your home tab to manage assumptions.")
 
 
+def daily_standup_job(client):  # noqa: ANN001
+    """Iterate active projects and ask for daily updates."""
+    today = date.today()
+    if today.weekday() >= 5 or today.isoformat() in PUBLIC_HOLIDAYS:
+        return
+    projects = db_service.get_active_projects()
+    for project in projects:
+        channel_id = project.get("channel_id")
+        if not channel_id:
+            continue
+        client.chat_postMessage(
+            channel=channel_id,
+            text="☀️ Daily Check-in!",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"Morning team! What's the main focus for *{project['name']}* today?"
+                        ),
+                    },
+                },
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Running Experiment"},
+                            "action_id": "update_status_running",
+                        },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Analyzing Data"},
+                            "action_id": "update_status_analysis",
+                        },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Blocked 🛑"},
+                            "action_id": "update_status_blocked",
+                        },
+                    ],
+                },
+            ],
+        )
+
+
+@app.action("update_status_running")
+def handle_status_running(ack, body, client):  # noqa: ANN001
+    ack()
+    client.chat_postMessage(
+        channel=body["channel"]["id"],
+        text=f"🧪 <@{body['user']['id']}> is running an experiment today.",
+    )
+
+
+@app.action("update_status_analysis")
+def handle_status_analysis(ack, body, client):  # noqa: ANN001
+    ack()
+    client.chat_postMessage(
+        channel=body["channel"]["id"],
+        text=f"📊 <@{body['user']['id']}> is analyzing data today.",
+    )
+
+
+@app.action("update_status_blocked")
+def handle_status_blocked(ack, body, client):  # noqa: ANN001
+    ack()
+    client.chat_postMessage(
+        channel=body["channel"]["id"],
+        text=f"🛑 <@{body['user']['id']}> is blocked and needs help.",
+        )
+
+
+def weekly_backup_job(client):  # noqa: ANN001
+    if not Config.BACKUP_CHANNEL:
+        return
+    output_path = backup_service.dump_database(Path("backups"))
+    if not output_path:
+        return
+    messenger_service.upload_file(
+        channel=Config.BACKUP_CHANNEL,
+        file=output_path,
+        filename=output_path.name,
+        title="Evidently Weekly Backup",
+        comment="Weekly database backup.",
+    )
+
+
+if Config.STANDUP_ENABLED:
+    standup_scheduler = BackgroundScheduler()
+    standup_scheduler.add_job(
+        daily_standup_job,
+        "cron",
+        hour=Config.STANDUP_HOUR,
+        minute=Config.STANDUP_MINUTE,
+        day_of_week="mon-fri",
+        args=[app.client],
+    )
+    standup_scheduler.start()
+
+if Config.BACKUP_ENABLED:
+    backup_scheduler = BackgroundScheduler()
+    backup_scheduler.add_job(
+        weekly_backup_job,
+        "cron",
+        day_of_week="sun",
+        hour=2,
+        minute=0,
+        args=[app.client],
+    )
+    backup_scheduler.start()
+
+
 # --- 8. START ---
 if __name__ == "__main__":
     def run_health_server() -> None:
@@ -1948,6 +2842,7 @@ if __name__ == "__main__":
 
         health_app.router.add_get("/", health_check)
         health_app.router.add_get("/healthz", health_check)
+        health_app.router.add_post("/asana/webhook", handle_asana_webhook)
         web.run_app(health_app, host=Config.HOST, port=Config.PORT, print=None, handle_signals=False)
 
     health_thread = threading.Thread(target=run_health_server, daemon=True)
