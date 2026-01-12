@@ -12,6 +12,7 @@ class UIManager:
     def get_home_view(
         user_id: str,
         project: dict[str, Any] | None,
+        all_projects: list[dict[str, Any]] | None = None,
         active_tab: str = "overview",
         metrics: dict[str, int] | None = None,
         stage_info: dict[str, Any] | None = None,
@@ -27,12 +28,43 @@ class UIManager:
             "case_study": "",
         }
 
-        blocks: list[dict[str, Any]] = [
+        all_projects = all_projects or []
+        if project and not any(item.get("id") == project.get("id") for item in all_projects):
+            all_projects = [*all_projects, {"name": project["name"], "id": project["id"]}]
+
+        project_options = [
+            {
+                "text": {"type": "plain_text", "text": item["name"][:75]},
+                "value": str(item["id"]),
+            }
+            for item in all_projects
+        ]
+        initial_option = next(
+            (option for option in project_options if option["value"] == str(project["id"])),
+            None,
+        )
+
+        blocks: list[dict[str, Any]] = []
+        if project_options:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "*Active Project:*"},
+                    "accessory": {
+                        "type": "static_select",
+                        "placeholder": {"type": "plain_text", "text": "Select Project"},
+                        "options": project_options,
+                        "initial_option": initial_option,
+                        "action_id": "select_active_project",
+                    },
+                }
+            )
+        blocks.append(
             {
                 "type": "header",
                 "text": {"type": "plain_text", "text": f"🚀 {project['name']}"},
             }
-        ]
+        )
         blocks.append({"type": "actions", "elements": UIManager._nav_buttons(active_tab)})
         blocks.append({"type": "divider"})
 
@@ -48,6 +80,21 @@ class UIManager:
             blocks.extend(UIManager._render_experiments_workspace(project, stage_info, subtab))
         elif workspace == "team":
             blocks.extend(UIManager._render_team_workspace(project, subtab))
+        elif workspace == "help":
+            blocks.extend(UIManager._render_help_workspace())
+
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "➕ New Project"},
+                        "action_id": "setup_step_1",
+                    }
+                ],
+            }
+        )
 
         return {"type": "home", "blocks": blocks}
 
@@ -61,6 +108,7 @@ class UIManager:
             ("3️⃣ Roadmap", "roadmap", "nav_roadmap"),
             ("4️⃣ Experiments", "experiments", "nav_experiments"),
             ("5️⃣ Team", "team", "nav_team"),
+            ("❓ Help", "help", "nav_help"),
         ]:
             button = {
                 "type": "button",
@@ -213,18 +261,34 @@ class UIManager:
             blocks.append(
                 {
                     "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "Collections help you group assumptions by theme or team.",
+                    "text": {"type": "mrkdwn", "text": "*📂 Smart Collections*"},
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "+ New Collection"},
+                        "action_id": "create_collection_modal",
                     },
                 }
             )
-            blocks.append(
-                {
-                    "type": "context",
-                    "elements": [{"type": "mrkdwn", "text": "No collections yet. Create one to get started."}],
-                }
-            )
+            collections = project.get("collections", [])
+            if not collections:
+                blocks.append(
+                    {
+                        "type": "context",
+                        "elements": [{"type": "mrkdwn", "text": "_No collections yet._"}],
+                    }
+                )
+            else:
+                for collection in collections:
+                    description = collection.get("description") or "No description"
+                    blocks.append(
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"📁 *{collection['name']}*\n_{description}_",
+                            },
+                        }
+                    )
             return blocks
 
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Project Roadmap (Now / Next / Later)*"}})
@@ -525,13 +589,35 @@ class UIManager:
             blocks.append(
                 {
                     "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": "Automation rules will help you triage AI insights automatically.",
+                    "text": {"type": "mrkdwn", "text": "*⚙️ Project Automation & Settings*"},
+                }
+            )
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "*⚡ Automation Rules*"},
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "+ New Rule"},
+                        "action_id": "create_automation_modal",
                     },
                 }
             )
-            blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "No rules yet."}]})
+            rules = project.get("automation_rules", [])
+            if not rules:
+                blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": "_No active rules._"}]})
+            else:
+                for rule in rules:
+                    status = "🟢 On" if rule.get("is_active") else "🔴 Off"
+                    blocks.append(
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"⚡ *When {rule['trigger_event']}* → *{rule['action_type']}* ({status})",
+                            },
+                        }
+                    )
             return blocks
 
         integrations = project.get("integrations") or {}
@@ -567,6 +653,55 @@ class UIManager:
             }
         )
         return blocks
+
+    @staticmethod
+    def _render_help_workspace() -> list[dict[str, Any]]:
+        return [
+            {"type": "header", "text": {"type": "plain_text", "text": "📘 Evidently Instruction Manual"}},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*1. Setup*\nCreate a project from the Home tab and link a channel for team updates."
+                    ),
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*2. The Roadmap (Now/Next/Later)*\n"
+                        "Add assumptions you want to test and prioritize them by lane."
+                    ),
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*3. The Toolkit*\nUse the Experiments tab to design tests. "
+                        "The AI can suggest methods based on your canvas."
+                    ),
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*4. Insights*\nUse the Extract Insights shortcut on any thread to capture evidence."
+                    ),
+                },
+            },
+            {"type": "divider"},
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": "Need more help? Contact the innovation team."}],
+            },
+        ]
 
     @staticmethod
     def _get_onboarding_view() -> dict:

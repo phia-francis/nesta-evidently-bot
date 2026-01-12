@@ -295,6 +295,30 @@ def extract_insights_modal() -> dict:
     }
 
 
+def get_loading_modal() -> dict:
+    """Returns a temporary modal to show while AI is processing."""
+    return {
+        "type": "modal",
+        "callback_id": "loading_modal",
+        "title": {"type": "plain_text", "text": "Evidently AI"},
+        "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "🧠 *Analyzing context...*"}},
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            "Identifying assumptions and extracting evidence from the thread. "
+                            "This may take a few seconds."
+                        ),
+                    }
+                ],
+            },
+        ],
+    }
+
+
 def add_canvas_item_modal(section: str) -> dict:
     return {
         "type": "modal",

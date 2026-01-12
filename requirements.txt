@@ -6,4 +6,5 @@ SQLAlchemy>=2.0.36
 google-api-python-client==2.111.0
 google-auth==2.26.1
 asana==3.2.2
-pandas==2.2.0
+pandas>=2.2.3
+reportlab==4.0.9

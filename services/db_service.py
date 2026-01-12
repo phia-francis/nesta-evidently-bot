@@ -53,6 +53,8 @@ class Project(Base):
     assumptions = relationship("Assumption", back_populates="project", cascade="all, delete-orphan")
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
     decisions = relationship("DecisionSession", back_populates="project")
+    collections = relationship("Collection", back_populates="project", cascade="all, delete-orphan")
+    automation_rules = relationship("AutomationRule", back_populates="project", cascade="all, delete-orphan")
 
 
 class ProjectMember(Base):
@@ -76,6 +78,31 @@ class CanvasItem(Base):
     ai_generated = Column(Boolean, default=False)
 
     project = relationship("Project", back_populates="canvas_items")
+
+
+class Collection(Base):
+    """Groups of experiments or assumptions (e.g., 'Q1 Priorities')."""
+
+    __tablename__ = "collections"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    name = Column(String(255))
+    description = Column(Text, nullable=True)
+
+    project = relationship("Project", back_populates="collections")
+
+
+class AutomationRule(Base):
+    """Rules like 'If Experiment Created -> Notify #channel'."""
+
+    __tablename__ = "automation_rules"
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    trigger_event = Column(String(100))
+    action_type = Column(String(100))
+    is_active = Column(Boolean, default=True)
+
+    project = relationship("Project", back_populates="automation_rules")
 
 
 class Experiment(Base):
@@ -323,6 +350,108 @@ class DbService:
             )
             return {"experiments": total_exp, "validated": validated, "rejected": rejected}
 
+    def create_collection(self, project_id: int, name: str, description: str | None) -> Collection:
+        with SessionLocal() as db:
+            collection = Collection(project_id=project_id, name=name, description=description)
+            db.add(collection)
+            db.commit()
+            db.refresh(collection)
+            return collection
+
+    def get_collections(self, project_id: int) -> list[dict]:
+        with SessionLocal() as db:
+            collections = db.query(Collection).filter(Collection.project_id == project_id).all()
+            return [self._serialize_collection(item) for item in collections]
+
+    def create_automation_rule(self, project_id: int, trigger: str, action: str) -> AutomationRule:
+        with SessionLocal() as db:
+            rule = AutomationRule(project_id=project_id, trigger_event=trigger, action_type=action)
+            db.add(rule)
+            db.commit()
+            db.refresh(rule)
+            return rule
+
+    def get_automation_rules(self, project_id: int) -> list[dict]:
+        with SessionLocal() as db:
+            rules = db.query(AutomationRule).filter(AutomationRule.project_id == project_id).all()
+            return [self._serialize_automation_rule(item) for item in rules]
+
+    def get_experiments(self, project_id: int) -> list[dict]:
+        with SessionLocal() as db:
+            experiments = db.query(Experiment).filter_by(project_id=project_id).all()
+            return [self._serialize_experiment(exp) for exp in experiments]
+
+    def create_experiment(
+        self,
+        project_id: int,
+        title: str | None = None,
+        method: str | None = None,
+        hypothesis: str | None = None,
+        data: dict | None = None,
+    ) -> Experiment:
+        data = data or {}
+        if title is not None:
+            data["title"] = title
+        if method is not None:
+            data["method"] = method
+        if hypothesis is not None:
+            data["hypothesis"] = hypothesis
+        data.setdefault("stage", "Develop")
+        data.setdefault("status", "Planning")
+        with SessionLocal() as db:
+            experiment = Experiment(
+                project_id=project_id,
+                title=data.get("title"),
+                hypothesis=data.get("hypothesis"),
+                method=data.get("method"),
+                stage=data.get("stage"),
+                status=data.get("status", "Planning"),
+                primary_kpi=data.get("primary_kpi"),
+                target_value=data.get("target_value"),
+                current_value=data.get("current_value"),
+                dataset_link=data.get("dataset_link"),
+            )
+            db.add(experiment)
+            db.commit()
+            db.refresh(experiment)
+            return experiment
+
+    def update_experiment(
+        self,
+        experiment_id: int,
+        data: dict | None = None,
+        status: str | None = None,
+        kpi: str | None = None,
+    ) -> None:
+        data = data or {}
+        if status is not None:
+            data["status"] = status
+        if kpi is not None:
+            data["current_value"] = kpi
+        with SessionLocal() as db:
+            experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+            if not experiment:
+                return
+            if "title" in data:
+                experiment.title = data["title"]
+            if "hypothesis" in data:
+                experiment.hypothesis = data["hypothesis"]
+            if "method" in data:
+                experiment.method = data["method"]
+            if "stage" in data:
+                experiment.stage = data["stage"]
+            if "status" in data:
+                experiment.status = data["status"]
+            if "primary_kpi" in data:
+                experiment.primary_kpi = data["primary_kpi"]
+            if "target_value" in data:
+                experiment.target_value = data["target_value"]
+            if "current_value" in data:
+                experiment.current_value = data["current_value"]
+            if "dataset_link" in data:
+                experiment.dataset_link = data["dataset_link"]
+            db.commit()
+
     def create_assumption(self, project_id: int, data: dict) -> Assumption:
         with SessionLocal() as db:
             assumption = Assumption(
@@ -356,6 +485,29 @@ class DbService:
                 return
             assumption.validation_status = status
             db.commit()
+
+    def update_assumption(self, assumption_id: int, data: dict) -> None:
+        with SessionLocal() as db:
+            assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
+            if not assumption:
+                return
+            if "title" in data:
+                assumption.title = data["title"]
+            if "lane" in data:
+                assumption.lane = data["lane"]
+            if "validation_status" in data:
+                assumption.validation_status = data["validation_status"]
+            if "evidence_density" in data:
+                assumption.evidence_density = data["evidence_density"]
+            db.commit()
+
+    def update_assumption_title(self, assumption_id: int, new_title: str) -> None:
+        self.update_assumption(assumption_id, {"title": new_title})
+
+    def get_experiment(self, experiment_id: int) -> Optional[Dict[str, Any]]:
+        with SessionLocal() as db:
+            experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+            return self._serialize_experiment(experiment) if experiment else None
 
     def get_assumption(self, assumption_id: int) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
@@ -424,17 +576,10 @@ class DbService:
             "channel_id": project.channel_id,
             "integrations": project.integrations,
             "assumptions": [self._serialize_assumption(a) for a in project.assumptions],
-            "experiments": [
-                {
-                    "id": exp.id,
-                    "title": exp.title,
-                    "method": exp.method,
-                    "status": exp.status,
-                    "primary_kpi": exp.primary_kpi,
-                }
-                for exp in project.experiments
-            ],
+            "experiments": [self._serialize_experiment(exp) for exp in project.experiments],
             "members": [{"user_id": member.user_id, "role": member.role} for member in project.members],
+            "collections": [self._serialize_collection(item) for item in project.collections],
+            "automation_rules": [self._serialize_automation_rule(item) for item in project.automation_rules],
             "canvas_items": [
                 {
                     "id": item.id,
@@ -444,6 +589,35 @@ class DbService:
                 }
                 for item in project.canvas_items
             ],
+        }
+
+    def _serialize_collection(self, collection: Collection) -> Dict[str, Any]:
+        return {
+            "id": collection.id,
+            "name": collection.name,
+            "description": collection.description,
+        }
+
+    def _serialize_automation_rule(self, rule: AutomationRule) -> Dict[str, Any]:
+        return {
+            "id": rule.id,
+            "trigger_event": rule.trigger_event,
+            "action_type": rule.action_type,
+            "is_active": rule.is_active,
+        }
+
+    def _serialize_experiment(self, experiment: Experiment) -> Dict[str, Any]:
+        return {
+            "id": experiment.id,
+            "title": experiment.title,
+            "hypothesis": experiment.hypothesis,
+            "method": experiment.method,
+            "stage": experiment.stage,
+            "status": experiment.status,
+            "primary_kpi": experiment.primary_kpi,
+            "target_value": experiment.target_value,
+            "current_value": experiment.current_value,
+            "dataset_link": experiment.dataset_link,
         }
 
     def _serialize_assumption(self, assumption: Assumption) -> Dict[str, Any]:
