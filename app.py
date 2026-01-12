@@ -957,15 +957,18 @@ def handle_edit_suggestion_submit(ack, body, client):  # noqa: ANN001
     values = body["view"]["state"]["values"]
     risk_text = values["risk_block"]["risk_input"]["value"]
     similar_title = db_service.find_similar_assumption(payload["project_id"], risk_text)
-    if similar_title:
-        messenger_service.post_ephemeral(
-            channel=body["user"]["id"],
-            user=body["user"]["id"],
-            text=f"⚠️ This looks similar to: “{similar_title}”.",
-        )
-    db_service.create_assumption(payload["project_id"], {"title": risk_text})
     response = client.conversations_open(users=body["user"]["id"])
     dm_channel = response.get("channel", {}).get("id")
+
+    if similar_title and dm_channel:
+        messenger_service.post_ephemeral(
+            channel=dm_channel,
+            user=body["user"]["id"],
+            text=f"⚠️ This looks similar to: “{similar_title}”."
+        )
+
+    db_service.create_assumption(payload["project_id"], {"title": risk_text})
+
     if dm_channel:
         client.chat_postMessage(channel=dm_channel, text="✅ Added the edited assumption.")
 
