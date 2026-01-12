@@ -848,8 +848,7 @@ def handle_ai_canvas(ack, body, client):  # noqa: ANN001
             publish_home_tab_async(client, user_id, "discovery:canvas")
         except Exception:  # noqa: BLE001
             logger.exception("Failed to generate canvas suggestion for %s", user_id)
-
-    run_in_background(generate_canvas_item)
+            client.chat_postEphemeral(user=user_id, text=f"Sorry, I couldn't generate a suggestion for '{section}'. Please try again.")
 
 
 @app.action("change_stage")
