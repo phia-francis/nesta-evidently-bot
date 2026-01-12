@@ -1,4 +1,5 @@
 class ToolkitService:
+    DEFAULT_METHOD_NAME = "User Interview"
     STAGES = {
         "DEFINE": {
             "desc": "Understand the problem and stakeholder needs.",
@@ -33,7 +34,7 @@ class ToolkitService:
     def get_question_bank(self, method_name: str) -> list[str]:
         """Returns a list of interview questions based on the method."""
         banks = {
-            "User Interview": [
+            self.DEFAULT_METHOD_NAME: [
                 "Tell me about the last time you encountered [Problem]?",
                 "What was the hardest part about that experience?",
                 "How do you currently solve this problem?",
@@ -53,4 +54,4 @@ class ToolkitService:
         for key in banks:
             if key.lower() in method_name.lower():
                 return banks[key]
-        return banks["User Interview"]
+        return banks[self.DEFAULT_METHOD_NAME]

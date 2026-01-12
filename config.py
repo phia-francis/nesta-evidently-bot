@@ -13,8 +13,8 @@ class Config:
     GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
     ASANA_TOKEN = os.environ.get("ASANA_TOKEN")
     ASANA_WORKSPACE_ID = os.environ.get("ASANA_WORKSPACE_ID")
-    # NEW: Standard Database URL
-    DATABASE_URL = os.environ["DATABASE_URL"]
+    # Standard Database URL (default to local SQLite for dev)
+    DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./evidently.db")
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     PORT = int(os.environ.get("PORT", 10000))
     HOST = os.environ.get("HOST", "0.0.0.0")

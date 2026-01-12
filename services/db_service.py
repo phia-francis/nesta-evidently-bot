@@ -1,5 +1,6 @@
 import datetime as dt
 import logging
+import os
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
@@ -7,11 +8,13 @@ from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, Str
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.orm import declarative_base, joinedload, relationship, sessionmaker
 
-from config import Config
+from services.toolkit_service import ToolkitService
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./evidently.db")
 
 
 def _build_engine():
-    url = make_url(Config.DATABASE_URL)
+    url = make_url(DATABASE_URL)
     connect_args = {}
 
     if url.drivername.startswith("postgresql") or url.drivername == "postgres":
@@ -184,10 +187,9 @@ class UserState(Base):
 class DbService:
     def __init__(self) -> None:
         try:
-            # ⚠️ TEMPORARY: Uncomment once to reset DB for new schema, then comment out.
-            # Base.metadata.drop_all(bind=engine)
-            Base.metadata.create_all(bind=engine)
-            self._log_schema_status()
+            if os.getenv("EVIDENTLY_AUTO_CREATE_DB", "true").lower() == "true":
+                Base.metadata.create_all(bind=engine)
+                self._log_schema_status()
         except Exception as exc:  # noqa: BLE001
             logging.warning("Unable to initialize database schema: %s", exc, exc_info=True)
 
@@ -220,6 +222,7 @@ class DbService:
         description: str | None = None,
         stage: str = "Define",
         channel_id: str | None = None,
+        add_starter_kit: bool = True,
     ) -> Project:
         with SessionLocal() as db:
             project = Project(
@@ -235,6 +238,24 @@ class DbService:
 
             member = ProjectMember(project_id=project.id, user_id=user_id, role="owner")
             db.add(member)
+            if add_starter_kit:
+                assumption = Assumption(
+                    project_id=project.id,
+                    title="We can reach the target audience through community partners.",
+                    lane="Now",
+                    validation_status="Testing",
+                    evidence_density=1,
+                    confidence_score=40,
+                )
+                experiment = Experiment(
+                    project_id=project.id,
+                    title="Partner outreach pilot",
+                    hypothesis="Local partners can recruit 20 participants within two weeks.",
+                    method=ToolkitService.DEFAULT_METHOD_NAME,
+                    stage="Develop",
+                    status="Planning",
+                )
+                db.add_all([assumption, experiment])
             db.commit()
             self._set_active_project(db, user_id, project.id)
             db.refresh(project)
