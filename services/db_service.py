@@ -257,7 +257,7 @@ class DbService:
                     # --- 3. Fix EXPERIMENTS Table (Prevent future crashes) ---
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS hypothesis TEXT;"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS primary_kpi VARCHAR(255);"))
-                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Planned';"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'planning';"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS start_date TIMESTAMP;"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS end_date TIMESTAMP;"))
 
