@@ -250,7 +250,7 @@ class DbService:
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(50) DEFAULT 'Testing';"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_density INTEGER DEFAULT 0;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_type VARCHAR(50);"))
-                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_id VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_id VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_snippet TEXT;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 0;"))
 
