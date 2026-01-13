@@ -331,3 +331,32 @@ Conversation:
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to extract action items", exc_info=True)
             return []
+
+
+class AiService:
+    def __init__(self) -> None:
+        genai.configure(api_key=Config.GOOGLE_API_KEY)
+        self.model = genai.GenerativeModel("gemini-1.5-flash")
+
+    def extract_assumptions(self, text: str) -> list[str]:
+        if not text:
+            return []
+        system_prompt = (
+            "Analyze the following text and extract a list of risky assumptions. "
+            "Return the result strictly as a raw JSON list of strings (e.g. ['Assumption 1', 'Assumption 2']). "
+            "Do not use Markdown formatting in the output."
+        )
+        try:
+            clean_text = EvidenceAI.redact_pii(text)
+            response = self.model.generate_content(f"{system_prompt}\n\n{clean_text}")
+            content = response.text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(content or "[]")
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return []
+        except json.JSONDecodeError:
+            logger.exception("Failed to parse Gemini response for assumptions")
+            return []
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to extract assumptions via Gemini")
+            return []
