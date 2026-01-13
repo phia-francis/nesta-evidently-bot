@@ -1091,36 +1091,85 @@ def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
     try:
-        data = body["view"]["state"]["values"]
+        values = body["view"]["state"]["values"]
         problem = body["view"]["private_metadata"]
-        name = data["name_block"]["name_input"]["value"]
-        stage = data["stage_block"]["stage_input"]["selected_option"]["value"]
+        name = values["name_block"]["name_input"]["value"]
+        stage = values["stage_block"]["stage_input"]["selected_option"]["value"]
+        mission = values["mission_block"]["mission_select"]["selected_option"]["value"]
+        channel_action = values["channel_block"]["channel_action"]["selected_option"]["value"]
 
-        db_service.create_project(user_id, name, description=problem, stage=stage)
+        channel_id = None
+        created_channel_name = None
+
+        if channel_action == "create_new":
+            clean_name = re.sub(r"[^a-z0-9-_]", "", name.lower().replace(" ", "-"))
+            channel_name = f"evidently-{clean_name}"[:80]
+            try:
+                c_resp = client.conversations_create(name=channel_name)
+                channel_id = c_resp["channel"]["id"]
+                created_channel_name = c_resp["channel"]["name"]
+                client.conversations_invite(channel=channel_id, users=user_id)
+                client.chat_postMessage(
+                    channel=channel_id,
+                    text=f"👋 Welcome to the home of *{name}*! I'll post updates here.",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to create channel %s: %s", channel_name, exc, exc_info=True)
+                client.chat_postEphemeral(
+                    user=user_id,
+                    channel=user_id,
+                    text=f"⚠️ Could not create channel #{channel_name} (it might already exist).",
+                )
+
+        db_service.create_project(
+            user_id,
+            name,
+            description=problem,
+            stage=stage,
+            mission=mission,
+            channel_id=channel_id,
+        )
+
+        msg_text = f"🎉 *{name}* is live!"
+        if created_channel_name:
+            msg_text += f"\nI've created <#{channel_id}> for your team."
+
+        blocks = [
+            NestaUI.header(f"🎉 {name} is live!"),
+            NestaUI.section(
+                f"We've set your stage to *{stage}* and mission to *{mission}*.\n"
+                "Add your first assumption to start de-risking."
+            ),
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "+ Add Assumption"},
+                        "action_id": "open_create_assumption",
+                    }
+                ],
+            },
+        ]
+        if created_channel_name:
+            blocks.insert(
+                2,
+                NestaUI.section(f"I've created <#{channel_id}> for your team."),
+            )
 
         client.chat_postMessage(
             channel=user_id,
-            blocks=[
-                NestaUI.header(f"🎉 {name} is live!"),
-                NestaUI.section(
-                    f"We've set your stage to *{stage}*.\nAdd your first assumption to start de-risking."
-                ),
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "+ Add Assumption"},
-                            "action_id": "open_create_assumption",
-                        }
-                    ],
-                },
-            ],
-            text="Project created",
+            blocks=blocks,
+            text=msg_text,
         )
         publish_home_tab_async(client, user_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to complete setup: %s", exc, exc_info=True)
+        client.chat_postEphemeral(
+            user=user_id,
+            channel=user_id,
+            text="Something went wrong creating the project.",
+        )
 
 
 def open_assumption_modal(client, trigger_id: str) -> None:
