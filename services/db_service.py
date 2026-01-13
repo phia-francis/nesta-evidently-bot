@@ -247,7 +247,7 @@ class DbService:
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS context_summary TEXT;"))
 
                     # --- 2. Fix ASSUMPTIONS Table (The one crashing now) ---
-                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(50) DEFAULT 'Untested';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(50) DEFAULT 'Testing';"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_density INTEGER DEFAULT 0;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_type VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_id VARCHAR(100);"))
