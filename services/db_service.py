@@ -256,10 +256,16 @@ class DbService:
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_id VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_snippet TEXT;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 0;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;"))
 
                     # --- 3. Fix EXPERIMENTS Table (Prevent future crashes) ---
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS hypothesis TEXT;"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS method VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS stage VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS primary_kpi VARCHAR(255);"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS target_value VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS current_value VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS dataset_link VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'planning';"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS start_date TIMESTAMP;"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS end_date TIMESTAMP;"))
@@ -268,7 +274,7 @@ class DbService:
         except SQLAlchemyError as exc:
             logging.exception("Manual database patch failed.")
             return f"❌ Patch failed: {exc}"
-            
+
     def create_project(
         self,
         user_id: str,
@@ -430,10 +436,38 @@ class DbService:
 
     def get_user_projects(self, user_id: str) -> list[dict[str, Any]]:
         with SessionLocal() as db:
-            memberships = db.query(ProjectMember).options(joinedload(ProjectMember.project)).filter(
-                ProjectMember.user_id == user_id
-            ).all()
-            return [{"name": m.project.name, "id": m.project_id} for m in memberships if m.project]
+            memberships = (
+                db.query(ProjectMember)
+                .options(joinedload(ProjectMember.project))
+                .filter(ProjectMember.user_id == user_id)
+                .all()
+            )
+            projects = []
+            for membership in memberships:
+                project = membership.project
+                if not project or project.status != "active":
+                    continue
+                projects.append(
+                    {
+                        "name": project.name,
+                        "id": membership.project_id,
+                        "channel_id": project.channel_id,
+                        "role": membership.role,
+                    }
+                )
+            return projects
+
+    def remove_project_member(self, project_id: int, user_id: str) -> None:
+        with SessionLocal() as db:
+            membership = (
+                db.query(ProjectMember)
+                .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
+                .first()
+            )
+            if not membership:
+                return
+            db.delete(membership)
+            db.commit()
 
     def find_project_by_fuzzy_name(self, name: str) -> int | None:
         """Find project by partial name match.
@@ -713,6 +747,14 @@ class DbService:
             if not assumption:
                 return
             db.delete(assumption)
+            db.commit()
+
+    def delete_experiment(self, experiment_id: int) -> None:
+        with SessionLocal() as db:
+            experiment = db.query(Experiment).filter(Experiment.id == experiment_id).first()
+            if not experiment:
+                return
+            db.delete(experiment)
             db.commit()
 
     def get_experiment(self, experiment_id: int) -> Optional[Dict[str, Any]]:

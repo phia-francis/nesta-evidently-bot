@@ -48,6 +48,18 @@ class UIManager:
         )
 
         blocks: list[dict[str, Any]] = []
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "⬅ Back to Projects"},
+                        "action_id": "back_to_hub",
+                    }
+                ],
+            }
+        )
         if project_options:
             blocks.append(
                 {
@@ -96,7 +108,12 @@ class UIManager:
                         "type": "button",
                         "text": {"type": "plain_text", "text": "➕ New Project"},
                         "action_id": "setup_step_1",
-                    }
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "⚡ Quick Create"},
+                        "action_id": "open_create_project_modal",
+                    },
                 ],
             }
         )
@@ -201,6 +218,20 @@ class UIManager:
                                 },
                             ],
                         },
+                    }
+                )
+                blocks.append(
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "Delete Experiment"},
+                                "action_id": "delete_experiment",
+                                "style": "danger",
+                                "value": str(experiment["id"]),
+                            }
+                        ],
                     }
                 )
         else:
@@ -414,20 +445,34 @@ class UIManager:
                             "type": "mrkdwn",
                             "text": f"• {item['title']} (Density: {item.get('evidence_density', 0)} docs)",
                         },
-                        "accessory": {
-                            "type": "overflow",
-                            "action_id": "assumption_overflow",
-                            "options": [
-                                {"text": {"type": "plain_text", "text": "Move to Now"}, "value": f"{item['id']}:Now"},
-                                {"text": {"type": "plain_text", "text": "Move to Next"}, "value": f"{item['id']}:Next"},
-                                {"text": {"type": "plain_text", "text": "Move to Later"}, "value": f"{item['id']}:Later"},
-                                {
-                                    "text": {"type": "plain_text", "text": "Design Experiment"},
-                                    "value": f"{item['id']}:exp",
-                                },
-                                {"text": {"type": "plain_text", "text": "Delete"}, "value": f"{item['id']}:delete"},
-                            ],
-                        },
+                    }
+                )
+                blocks.append(
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "Edit"},
+                                "action_id": "edit_assumption",
+                                "value": str(item["id"]),
+                            },
+                            {
+                                "type": "overflow",
+                                "action_id": "assumption_overflow",
+                                "options": [
+                                    {"text": {"type": "plain_text", "text": "Move to Now"}, "value": f"{item['id']}:Now"},
+                                    {"text": {"type": "plain_text", "text": "Move to Next"}, "value": f"{item['id']}:Next"},
+                                    {"text": {"type": "plain_text", "text": "Move to Later"}, "value": f"{item['id']}:Later"},
+                                    {"text": {"type": "plain_text", "text": "Edit Text"}, "value": f"{item['id']}:edit_text"},
+                                    {
+                                        "text": {"type": "plain_text", "text": "Design Experiment"},
+                                        "value": f"{item['id']}:exp",
+                                    },
+                                    {"text": {"type": "plain_text", "text": "Delete"}, "value": f"{item['id']}:delete"},
+                                ],
+                            },
+                        ],
                     }
                 )
             blocks.append({"type": "divider"})
@@ -556,6 +601,20 @@ class UIManager:
                                     },
                                 ],
                             },
+                        }
+                    )
+                    blocks.append(
+                        {
+                            "type": "actions",
+                            "elements": [
+                                {
+                                    "type": "button",
+                                    "text": {"type": "plain_text", "text": "Delete Experiment"},
+                                    "action_id": "delete_experiment",
+                                    "style": "danger",
+                                    "value": str(experiment["id"]),
+                                }
+                            ],
                         }
                     )
             return blocks
@@ -742,9 +801,7 @@ class UIManager:
                     ],
                 }
             )
-            return blocks
-
-        if subtab == "automation":
+        elif subtab == "automation":
             blocks.append(
                 {
                     "type": "section",
@@ -777,93 +834,110 @@ class UIManager:
                             },
                         }
                     )
-            return blocks
+        else:
+            integrations = project.get("integrations") or {}
+            blocks.append({"type": "header", "text": {"type": "plain_text", "text": "🔗 Integrations"}})
 
-        integrations = project.get("integrations") or {}
-        blocks.append({"type": "header", "text": {"type": "plain_text", "text": "🔗 Integrations"}})
+            drive_connected = integrations.get("drive", {}).get("connected")
+            drive_status = "✅ Connected" if drive_connected else "⚪ Disconnected"
+            drive_action_text = "Manage" if drive_connected else "Connect"
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*Google Drive*\n{drive_status}"},
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": drive_action_text},
+                        "action_id": "connect_drive",
+                    },
+                }
+            )
 
-        drive_connected = integrations.get("drive", {}).get("connected")
-        drive_status = "✅ Connected" if drive_connected else "⚪ Disconnected"
-        drive_action_text = "Manage" if drive_connected else "Connect"
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*Google Drive*\n{drive_status}"},
-                "accessory": {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": drive_action_text},
-                    "action_id": "connect_drive",
-                },
-            }
-        )
+            asana_connected = integrations.get("asana", {}).get("connected")
+            asana_status = "✅ Connected" if asana_connected else "⚪ Disconnected"
+            asana_action_text = "Manage" if asana_connected else "Connect"
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*Asana*\n{asana_status}"},
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": asana_action_text},
+                        "action_id": "connect_asana",
+                    },
+                }
+            )
+            channel_id = project.get("channel_id")
+            channel_text = f"Linked channel: <#{channel_id}>" if channel_id else "No channel linked yet."
+            blocks.append({"type": "divider"})
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "*Slack Channel*\n" + channel_text},
+                }
+            )
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Link Existing Channel"},
+                            "action_id": "open_link_channel",
+                        },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Create New Channel"},
+                            "action_id": "open_create_channel",
+                        },
+                    ],
+                }
+            )
 
-        asana_connected = integrations.get("asana", {}).get("connected")
-        asana_status = "✅ Connected" if asana_connected else "⚪ Disconnected"
-        asana_action_text = "Manage" if asana_connected else "Connect"
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*Asana*\n{asana_status}"},
-                "accessory": {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": asana_action_text},
-                    "action_id": "connect_asana",
-                },
-            }
-        )
-        channel_id = project.get("channel_id")
-        channel_text = f"Linked channel: <#{channel_id}>" if channel_id else "No channel linked yet."
         blocks.append({"type": "divider"})
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "*Slack Channel*\n" + channel_text},
-            }
-        )
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Settings*"}})
         blocks.append(
             {
                 "type": "actions",
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Link Existing Channel"},
-                        "action_id": "open_link_channel",
-                    },
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Create New Channel"},
-                        "action_id": "open_create_channel",
-                    },
+                        "text": {"type": "plain_text", "text": "Edit Details"},
+                        "action_id": "open_edit_project_modal",
+                    }
                 ],
             }
         )
         blocks.append({"type": "divider"})
-        blocks.append(
-            {
-                "type": "section",
-                "text": {"type": "mrkdwn", "text": "*⚠️ Danger Zone*"},
-            }
-        )
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*⚠️ Danger Zone*"}})
         blocks.append(
             {
                 "type": "actions",
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Edit Project Details"},
-                        "action_id": "open_edit_project",
+                        "text": {"type": "plain_text", "text": "Archive Project"},
+                        "action_id": "archive_project",
                     },
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Archive Project"},
-                        "action_id": "confirm_archive_project",
-                        "style": "danger",
+                        "text": {"type": "plain_text", "text": "Leave Project"},
+                        "action_id": "leave_project",
                     },
                     {
                         "type": "button",
                         "text": {"type": "plain_text", "text": "Delete Project"},
-                        "action_id": "confirm_delete_project",
+                        "action_id": "delete_project_confirm",
                         "style": "danger",
+                        "confirm": {
+                            "title": {"type": "plain_text", "text": "Delete this project?"},
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "This action cannot be undone.",
+                            },
+                            "confirm": {"type": "plain_text", "text": "Delete"},
+                            "deny": {"type": "plain_text", "text": "Cancel"},
+                        },
                     },
                 ],
             }
@@ -938,3 +1012,48 @@ class UIManager:
                 },
             ],
         }
+
+    @staticmethod
+    def render_project_hub(projects: list[dict[str, Any]]) -> dict:
+        blocks: list[dict[str, Any]] = [
+            {"type": "header", "text": {"type": "plain_text", "text": "Your Projects"}},
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Create Project"},
+                        "action_id": "open_create_project_modal",
+                        "style": "primary",
+                    }
+                ],
+            },
+        ]
+        if not projects:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "You don't have any projects yet."},
+                }
+            )
+            return {"type": "home", "blocks": blocks}
+
+        for project in projects:
+            channel_text = f"<#{project['channel_id']}>" if project.get("channel_id") else "No channel linked"
+            role = project.get("role", "member")
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{project['name']}*\nRole: {role} • {channel_text}",
+                    },
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Open"},
+                        "action_id": "open_project_dashboard",
+                        "value": str(project["id"]),
+                    },
+                }
+            )
+        return {"type": "home", "blocks": blocks}
