@@ -397,6 +397,11 @@ class DbService:
             return [{"name": m.project.name, "id": m.project_id} for m in memberships if m.project]
 
     def find_project_by_fuzzy_name(self, name: str) -> int | None:
+        """Find project by partial name match.
+
+        Note: ILIKE with a leading wildcard can be slow on large tables. Consider
+        a trigram index or full-text search if project count grows.
+        """
         if not name:
             return None
         with SessionLocal() as db:

@@ -69,6 +69,8 @@ from services.toolkit_service import ToolkitService
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+MAX_ASANA_PAYLOAD_ITEM_LENGTH = 100
+
 ConfigManager().validate()
 
 app = App(token=Config.SLACK_BOT_TOKEN, signing_secret=Config.SLACK_SIGNING_SECRET)
@@ -1800,9 +1802,10 @@ def check_asana_alignment(project: dict, channel_id: str, client) -> None:  # no
         return
 
     missing_items = missing_items[:5]
-    max_item_length = 100
     missing_items = [
-        item if len(item) <= max_item_length else f"{item[:max_item_length - 1].rstrip()}…"
+        item
+        if len(item) <= MAX_ASANA_PAYLOAD_ITEM_LENGTH
+        else f"{item[:MAX_ASANA_PAYLOAD_ITEM_LENGTH - 1].rstrip()}…"
         for item in missing_items
     ]
     payload = json.dumps({"project_id": project["id"], "items": missing_items})
