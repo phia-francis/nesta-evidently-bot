@@ -4,9 +4,10 @@ import os
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, inspect
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, inspect, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, joinedload, relationship, sessionmaker
 
 from services.toolkit_service import ToolkitService
@@ -229,6 +230,20 @@ class DbService:
                 "Database schema appears outdated. Missing: %s. Run a migration or reset the DB before use.",
                 ", ".join(missing),
             )
+
+    def run_manual_patch(self) -> str:
+        try:
+            with engine.connect() as connection:
+                with connection.begin():
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS mission TEXT;"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS channel_id VARCHAR(50);"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS stage VARCHAR(50) DEFAULT 'Define';"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS integrations JSON DEFAULT '{}';"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS context_summary TEXT;"))
+            return "✅ Database patched successfully! Columns added."
+        except SQLAlchemyError as exc:
+            logging.exception("Manual database patch failed.")
+            return f"❌ Patch failed: {exc}"
 
     def create_project(
         self,

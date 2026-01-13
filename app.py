@@ -831,6 +831,32 @@ def handle_status_command(ack, body, client):  # noqa: ANN001
     )
 
 
+@app.command("/evidently-fix-db")
+def handle_db_fix(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user_id"]
+    if user_id not in getattr(Config, "ADMIN_USERS", []):
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text="⛔ You are not authorized to run this command.",
+        )
+        return
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text="🛠️ Attempting to patch database schema...",
+    )
+
+    result_message = db_service.run_manual_patch()
+
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text=result_message,
+    )
+
+
 @app.command("/evidently-ask")
 def handle_ask_command(ack, body, client):  # noqa: ANN001
     """
