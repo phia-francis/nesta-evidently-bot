@@ -190,8 +190,11 @@ class UserState(Base):
 class DbService:
     def __init__(self) -> None:
         try:
-            if os.getenv("EVIDENTLY_AUTO_CREATE_DB", "true").lower() == "true":
+            if os.getenv("EVIDENTLY_RESET_DB_ON_STARTUP", "false").lower() == "true":
+                logging.warning("DROPPING ALL DATABASE TABLES based on EVIDENTLY_RESET_DB_ON_STARTUP env var.")
                 Base.metadata.drop_all(bind=engine)
+
+            if os.getenv("EVIDENTLY_AUTO_CREATE_DB", "true").lower() == "true":
                 Base.metadata.create_all(bind=engine)
                 self._log_schema_status()
         except Exception as exc:  # noqa: BLE001
