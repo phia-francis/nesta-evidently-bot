@@ -425,6 +425,7 @@ class UIManager:
                                     "text": {"type": "plain_text", "text": "Design Experiment"},
                                     "value": f"{item['id']}:exp",
                                 },
+                                {"text": {"type": "plain_text", "text": "Delete"}, "value": f"{item['id']}:delete"},
                             ],
                         },
                     }
@@ -626,6 +627,11 @@ class UIManager:
                 "elements": [
                     {
                         "type": "button",
+                        "text": {"type": "plain_text", "text": "🔍 Extract Insights (Manual)"},
+                        "action_id": "open_extract_insights",
+                    },
+                    {
+                        "type": "button",
                         "text": {"type": "plain_text", "text": "📄 Generate Learning Report (PDF)"},
                         "value": "pdf",
                         "action_id": "export_report",
@@ -684,6 +690,32 @@ class UIManager:
                         "style": "primary" if subtab == "automation" else "default",
                     },
                 ],
+            }
+        )
+        blocks.append({"type": "divider"})
+
+        members = project.get("members", [])
+        member_count = len(members)
+        if members:
+            member_lines = []
+            for member in members:
+                user_id = member.get("user_id", "unknown")
+                role = member.get("role", "member")
+                member_lines.append(f"• <@{user_id}> ({role})")
+            members_text = "\n".join(member_lines)
+        else:
+            members_text = "_No team members yet._"
+
+        blocks.append({"type": "header", "text": {"type": "plain_text", "text": "👤 Team Management"}})
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Members ({member_count}):*\n{members_text}"},
+                "accessory": {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Invite Member"},
+                    "action_id": "open_invite_member",
+                },
             }
         )
         blocks.append({"type": "divider"})
@@ -785,7 +817,7 @@ class UIManager:
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": "*Slack Channel Integration*\n" + channel_text},
+                "text": {"type": "mrkdwn", "text": "*Slack Channel*\n" + channel_text},
             }
         )
         blocks.append(

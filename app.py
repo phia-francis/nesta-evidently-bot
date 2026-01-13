@@ -69,6 +69,8 @@ from services.toolkit_service import ToolkitService
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+MAX_ASANA_PAYLOAD_ITEM_LENGTH = 100
+
 ConfigManager().validate()
 
 app = App(token=Config.SLACK_BOT_TOKEN, signing_secret=Config.SLACK_SIGNING_SECRET)
@@ -143,13 +145,11 @@ def execute_log_evidence(step, complete, fail):  # noqa: ANN001
     evidence_text = inputs.get("evidence_text", {}).get("value")
 
     try:
-        # Logic: Find project and add to 'Inbox' or 'Canvas'
-        # project = db.find_project(name=project_name)
-        # db.add_evidence(project.id, evidence_text)
-
-        # Simulating success for now
-        print(f"✅ Workflow Logged Evidence for {project_name}: {evidence_text}")
-
+        project_id = db_service.find_project_by_fuzzy_name(project_name)
+        if not project_id:
+            fail(error={"message": f"Project not found for name: {project_name}"})
+            return
+        db_service.add_canvas_item(project_id, section="Progress", text=evidence_text or "")
         complete(outputs={"status": "success"})
 
     except Exception as exc:  # noqa: BLE001
@@ -1802,6 +1802,12 @@ def check_asana_alignment(project: dict, channel_id: str, client) -> None:  # no
         return
 
     missing_items = missing_items[:5]
+    missing_items = [
+        item
+        if len(item) <= MAX_ASANA_PAYLOAD_ITEM_LENGTH
+        else f"{item[:MAX_ASANA_PAYLOAD_ITEM_LENGTH - 1].rstrip()}…"
+        for item in missing_items
+    ]
     payload = json.dumps({"project_id": project["id"], "items": missing_items})
     client.chat_postMessage(
         channel=channel_id,
@@ -2349,6 +2355,27 @@ def open_update_experiment_modal(client, trigger_id: str, experiment: dict) -> N
             "blocks": [
                 {
                     "type": "input",
+                    "block_id": "title_block",
+                    "label": {"type": "plain_text", "text": "Title"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "title_input",
+                        "initial_value": experiment.get("title") or "",
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "hypothesis_block",
+                    "label": {"type": "plain_text", "text": "Hypothesis"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "hypothesis_input",
+                        "multiline": True,
+                        "initial_value": experiment.get("hypothesis") or "",
+                    },
+                },
+                {
+                    "type": "input",
                     "block_id": "status_block",
                     "label": {"type": "plain_text", "text": "Current Status"},
                     "element": {
@@ -2437,10 +2464,17 @@ def handle_update_experiment_submit(ack, body, client, logger):  # noqa: ANN001
     experiment_id = int(body["view"]["private_metadata"])
     try:
         values = body["view"]["state"]["values"]
+        title = values["title_block"]["title_input"]["value"]
+        hypothesis = values["hypothesis_block"]["hypothesis_input"]["value"]
         status = values["status_block"]["status"]["selected_option"]["value"]
         kpi_value = values.get("kpi_block", {}).get("kpi_value", {}).get("value")
 
-        db_service.update_experiment(experiment_id, status=status, kpi=kpi_value)
+        db_service.update_experiment(
+            experiment_id,
+            data={"title": title, "hypothesis": hypothesis},
+            status=status,
+            kpi=kpi_value,
+        )
         project = db_service.get_active_project(user_id)
         if project and project.get("channel_id"):
             status_emoji = {"Live": "🟢", "Completed": "✅", "Paused": "🛑"}.get(status, "🔵")
@@ -2967,6 +3001,10 @@ def handle_assumption_overflow(ack, body, client, logger):  # noqa: ANN001
         if action in {"Now", "Next", "Later"}:
             db_service.update_assumption_lane(int(assumption_id), action)
             client.chat_postEphemeral(channel=user_id, user=user_id, text=f"Moved to {action}.")
+        elif action == "delete":
+            db_service.delete_assumption(int(assumption_id))
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Assumption deleted.")
+            publish_home_tab_async(client, user_id, "roadmap:roadmap")
         elif action == "exp":
             assumption = db_service.get_assumption(int(assumption_id))
             if not assumption:
