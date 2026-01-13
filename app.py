@@ -6,10 +6,12 @@ import threading
 import time
 from datetime import date
 from pathlib import Path
+from typing import Any
 from urllib import error as url_error
 from urllib import request as url_request
 from aiohttp import web
 from apscheduler.schedulers.background import BackgroundScheduler
+from flask import Flask, Response, request
 import pandas as pd
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -54,11 +56,12 @@ from blocks.methods_ui import method_cards
 from config import Config
 from config_manager import ConfigManager
 from services import knowledge_base
-from services.ai_service import EvidenceAI
+from services.ai_service import AiService, EvidenceAI
 from services.db_service import DbService
 from services.decision_service import DecisionRoomService
 from services.backup_service import BackupService
 from services.google_workspace_service import GoogleWorkspaceService
+from services.google_service import GoogleService
 from services.integration_service import IntegrationService
 from services.ingestion_service import IngestionService
 from services.messenger_service import MessengerService
@@ -77,6 +80,7 @@ ConfigManager().validate()
 
 app = App(token=Config.SLACK_BOT_TOKEN, signing_secret=Config.SLACK_SIGNING_SECRET)
 ai_service = EvidenceAI()
+ai_extractor = AiService()
 db_service = DbService()
 decision_service = DecisionRoomService(db_service)
 playbook = PlaybookService()
@@ -86,6 +90,8 @@ ingestion_service = IngestionService()
 sync_service = TwoWaySyncService()
 messenger_service = MessengerService(app.client)
 backup_service = BackupService()
+google_service = GoogleService()
+flask_app = Flask(__name__)
 try:
     google_workspace_service = GoogleWorkspaceService()
 except Exception:  # noqa: BLE001
@@ -407,6 +413,36 @@ def parse_message_link(message_link: str) -> tuple[str | None, str | None]:
         return None, None
     ts = f"{ts_raw[:-6]}.{ts_raw[-6:]}"
     return channel_id, ts
+
+
+def extract_drive_file_id(link: str) -> str | None:
+    patterns = [
+        r"/d/([a-zA-Z0-9_-]+)",
+        r"open\?id=([a-zA-Z0-9_-]+)",
+        r"id=([a-zA-Z0-9_-]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, link)
+        if match:
+            return match.group(1)
+    return link.strip() or None
+
+
+def save_assumptions_from_text(project_id: int, assumptions: list[str]) -> int:
+    saved = 0
+    for assumption_text in assumptions:
+        if not assumption_text.strip():
+            continue
+        db_service.create_assumption(
+            project_id,
+            {
+                "title": assumption_text.strip(),
+                "lane": "Now",
+                "validation_status": "Testing",
+            },
+        )
+        saved += 1
+    return saved
 
 
 def apply_channel_template(client, channel_id: str, tabs: list[str]) -> None:
@@ -1385,6 +1421,146 @@ def open_create_assumption_modal(ack, body, client):  # noqa: ANN001
     open_assumption_modal(client, body["trigger_id"])
 
 
+@app.action("open_drive_import_modal")
+def open_drive_import_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "drive_import_submit",
+            "title": {"type": "plain_text", "text": "Import from Drive"},
+            "submit": {"type": "plain_text", "text": "Import"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "drive_link_block",
+                    "label": {"type": "plain_text", "text": "Google Doc Link"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "drive_link_input",
+                        "placeholder": {"type": "plain_text", "text": "Paste a Google Doc URL"},
+                    },
+                }
+            ],
+        },
+    )
+
+
+@app.view("drive_import_submit")
+def handle_drive_import_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    values = body["view"]["state"]["values"]
+    link = values["drive_link_block"]["drive_link_input"]["value"]
+    file_id = extract_drive_file_id(link or "")
+    if not file_id:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please provide a valid Google Doc link.")
+        return
+    token_data = db_service.get_google_token(project["id"])
+    if not token_data or not token_data.get("access_token"):
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text="Google Drive is not connected. Use the Connect Google Drive button first.",
+        )
+        return
+    access_token = token_data["access_token"]
+    refresh_token = token_data.get("refresh_token")
+    token_expiry = token_data.get("token_expiry")
+    if refresh_token and google_service.token_is_expired(token_expiry):
+        try:
+            refreshed = google_service.refresh_access_token(refresh_token)
+            access_token = refreshed.get("access_token", access_token)
+            db_service.update_google_tokens(
+                project["id"],
+                access_token,
+                refreshed.get("refresh_token", refresh_token),
+                refreshed.get("expires_in"),
+            )
+        except Exception:
+            logger.exception("Failed to refresh Google token")
+            client.chat_postEphemeral(
+                channel=user_id,
+                user=user_id,
+                text="Failed to refresh Google Drive access. Please reconnect Drive.",
+            )
+            return
+    try:
+        content = google_service.fetch_file_content(file_id, access_token)
+    except Exception:
+        logger.exception("Failed to fetch Drive content")
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text="Unable to fetch that document. Check the link and permissions.",
+        )
+        return
+    assumptions = ai_extractor.extract_assumptions(content)
+    saved = save_assumptions_from_text(project["id"], assumptions)
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text=f"Imported {saved} assumptions from Drive.",
+    )
+    publish_home_tab_async(client, user_id, "roadmap:roadmap")
+
+
+@app.action("open_magic_paste_modal")
+def open_magic_paste_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "magic_paste_submit",
+            "title": {"type": "plain_text", "text": "Magic Paste"},
+            "submit": {"type": "plain_text", "text": "Import"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "magic_paste_block",
+                    "label": {"type": "plain_text", "text": "Paste content"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "magic_paste_input",
+                        "multiline": True,
+                    },
+                }
+            ],
+        },
+    )
+
+
+@app.view("magic_paste_submit")
+def handle_magic_paste_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    values = body["view"]["state"]["values"]
+    pasted_text = values["magic_paste_block"]["magic_paste_input"]["value"]
+    if not pasted_text:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please paste some content to import.")
+        return
+    assumptions = ai_extractor.extract_assumptions(pasted_text)
+    saved = save_assumptions_from_text(project["id"], assumptions)
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text=f"Imported {saved} assumptions from your pasted content.",
+    )
+    publish_home_tab_async(client, user_id, "roadmap:roadmap")
+
+
 @app.action("edit_assumption")
 def open_edit_assumption(ack, body, client):  # noqa: ANN001
     ack()
@@ -1696,8 +1872,9 @@ def _handle_project_management_action(ack, body, client, action_name: str) -> No
         member_count = db_service.count_project_members(project["id"])
         if member_count <= 1:
             db_service.archive_project(project["id"])
+            db_service.leave_project(project["id"], user_id)
         else:
-            db_service.remove_project_member(project["id"], user_id)
+            db_service.leave_project(project["id"], user_id)
     elif action_name == "delete":
         db_service.delete_project(project["id"])
 
@@ -1904,6 +2081,150 @@ def extract_insights_submit(ack, body, client, logger):  # noqa: ANN001
         ts = history["messages"][0]["ts"]
 
     run_thread_analysis(client, channel_id, ts, logger)
+
+
+def _get_integration_modal_config(integration_type: str) -> tuple[str, str]:
+    if integration_type == "drive":
+        return "Google Drive", "Drive folder URL or ID"
+    if integration_type == "asana":
+        return "Asana", "Asana project URL or ID"
+    if integration_type == "miro":
+        return "Miro", "Miro board URL or ID"
+    return "Integration", "External URL or ID"
+
+
+def _open_integration_modal(client, trigger_id: str, project: dict[str, Any], integration_type: str) -> None:
+    title, label = _get_integration_modal_config(integration_type)
+    integrations = project.get("integrations") or {}
+    existing_value = None
+    if integration_type == "drive":
+        existing_value = integrations.get("drive", {}).get("folder_id")
+    elif integration_type == "asana":
+        existing_value = integrations.get("asana", {}).get("project_id")
+    elif integration_type == "miro":
+        existing_value = integrations.get("miro", {}).get("board_url")
+
+    element: dict[str, Any] = {"type": "plain_text_input", "action_id": "integration_value"}
+    if existing_value:
+        element["initial_value"] = existing_value
+
+    client.views_open(
+        trigger_id=trigger_id,
+        view={
+            "type": "modal",
+            "callback_id": "integration_modal_submit",
+            "private_metadata": json.dumps({"project_id": project["id"], "type": integration_type}),
+            "title": {"type": "plain_text", "text": title},
+            "submit": {"type": "plain_text", "text": "Save"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "integration_block",
+                    "label": {"type": "plain_text", "text": label},
+                    "element": element,
+                }
+            ],
+        },
+    )
+
+
+@app.action("open_integration_modal_drive")
+def open_integration_modal_drive(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    _open_integration_modal(client, body["trigger_id"], project, "drive")
+
+
+@app.action("connect_google_drive")
+def connect_google_drive(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    try:
+        auth_url = google_service.get_auth_url(project["id"])
+    except ValueError:
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text="Google OAuth is not configured. Set GOOGLE_CLIENT_ID/SECRET and GOOGLE_REDIRECT_URI.",
+        )
+        return
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text=f"Connect your Google Drive here: {auth_url}",
+    )
+
+
+@app.action("open_integration_modal_asana")
+def open_integration_modal_asana(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    _open_integration_modal(client, body["trigger_id"], project, "asana")
+
+
+@app.action("open_integration_modal_miro")
+def open_integration_modal_miro(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    _open_integration_modal(client, body["trigger_id"], project, "miro")
+
+
+@app.view("integration_modal_submit")
+def handle_integration_modal_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        metadata = json.loads(body["view"]["private_metadata"] or "{}")
+        project_id = int(metadata.get("project_id"))
+        integration_type = metadata.get("type")
+        values = body["view"]["state"]["values"]
+        external_id = values["integration_block"]["integration_value"].get("value") or None
+        if integration_type and project_id:
+            db_service.add_integration_link(project_id, integration_type, external_id)
+        publish_home_tab_async(client, user_id, "team:integrations")
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to update integration settings", exc_info=True)
+
+
+@flask_app.route("/auth/callback/google")
+def google_auth_callback() -> Response:
+    code = request.args.get("code")
+    state = request.args.get("state")
+    if not code or not state:
+        return Response("Missing code or state.", status=400)
+    try:
+        project_id = int(state)
+    except ValueError:
+        return Response("Invalid state.", status=400)
+    try:
+        token_response = google_service.exchange_code(code)
+        db_service.update_google_tokens(
+            project_id,
+            token_response.get("access_token", ""),
+            token_response.get("refresh_token"),
+            token_response.get("expires_in"),
+        )
+        return Response("<h2>Connection Successful</h2>", status=200, mimetype="text/html")
+    except Exception:  # noqa: BLE001
+        logger.exception("Google OAuth callback failed")
+        return Response("Connection failed.", status=500)
 
 
 @app.action("connect_drive")
@@ -2629,7 +2950,7 @@ def delete_experiment(ack, body, client):  # noqa: ANN001
         )
         return
     db_service.delete_experiment(experiment_id)
-    publish_home_tab_async(client, user_id, "experiments:active")
+    publish_home_tab_async(client, user_id)
 
 
 ASANA_DATASET_LINK_PREFIX = "asana:"
@@ -3507,6 +3828,12 @@ if __name__ == "__main__":
 
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
+
+    def run_oauth_server() -> None:
+        flask_app.run(host=Config.HOST, port=Config.OAUTH_PORT, debug=False, use_reloader=False)
+
+    oauth_thread = threading.Thread(target=run_oauth_server, daemon=True)
+    oauth_thread.start()
 
     handler = SocketModeHandler(app, Config.SLACK_APP_TOKEN)
     handler.start()

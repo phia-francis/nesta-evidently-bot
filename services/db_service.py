@@ -45,6 +45,9 @@ class Project(Base):
     channel_id = Column(String(50))
     created_by = Column(String(50))
     created_at = Column(DateTime, default=dt.datetime.utcnow)
+    google_access_token = Column(Text, nullable=True)
+    google_refresh_token = Column(Text, nullable=True)
+    token_expiry = Column(DateTime, nullable=True)
 
     integrations = Column(
         JSON,
@@ -52,6 +55,7 @@ class Project(Base):
             "drive": {"connected": False, "folder_id": None},
             "calendar": {"connected": False},
             "asana": {"connected": False, "project_id": None},
+            "miro": {"connected": False, "board_url": None},
         },
     )
 
@@ -208,7 +212,16 @@ class DbService:
     def _log_schema_status(self) -> None:
         inspector = inspect(engine)
         expected_tables = {
-            "projects": {"stage", "integrations", "channel_id", "mission", "context_summary"},
+            "projects": {
+                "stage",
+                "integrations",
+                "channel_id",
+                "mission",
+                "context_summary",
+                "google_access_token",
+                "google_refresh_token",
+                "token_expiry",
+            },
             "assumptions": {
                 "validation_status",
                 "evidence_density",
@@ -248,6 +261,9 @@ class DbService:
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS stage VARCHAR(50) DEFAULT 'Define';"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS integrations JSON DEFAULT '{}';"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS context_summary TEXT;"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS google_access_token TEXT;"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS google_refresh_token TEXT;"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS token_expiry TIMESTAMP;"))
 
                     # --- 2. Fix ASSUMPTIONS Table (The one crashing now) ---
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(50) DEFAULT 'Testing';"))
@@ -380,6 +396,26 @@ class DbService:
             project.mission = mission
             db.commit()
 
+    def update_project(self, project_id: int, data: dict[str, Any]) -> None:
+        allowed_fields = {
+            "name",
+            "description",
+            "mission",
+            "stage",
+            "channel_id",
+            "status",
+            "context_summary",
+            "integrations",
+        }
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return
+            for key, value in data.items():
+                if key in allowed_fields:
+                    setattr(project, key, value)
+            db.commit()
+
     def archive_project(self, project_id: int) -> None:
         with SessionLocal() as db:
             project = db.query(Project).filter(Project.id == project_id).first()
@@ -394,6 +430,18 @@ class DbService:
             if not project:
                 return
             db.delete(project)
+            db.commit()
+
+    def leave_project(self, project_id: int, user_id: str) -> None:
+        with SessionLocal() as db:
+            membership = (
+                db.query(ProjectMember)
+                .filter(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
+                .first()
+            )
+            if not membership:
+                return
+            db.delete(membership)
             db.commit()
 
     def clear_active_project(self, user_id: str) -> None:
@@ -449,6 +497,8 @@ class DbService:
                     continue
                 projects.append(
                     {
+                        "mission": project.mission,
+                        "stage": project.stage,
                         "name": project.name,
                         "id": membership.project_id,
                         "channel_id": project.channel_id,
@@ -522,6 +572,8 @@ class DbService:
                 integrations["drive"] = {"connected": bool(external_id), "folder_id": external_id}
             if type_ == "asana":
                 integrations["asana"] = {"connected": bool(external_id), "project_id": external_id}
+            if type_ == "miro":
+                integrations["miro"] = {"connected": bool(external_id), "board_url": external_id}
             project.integrations = integrations
             db.commit()
 
@@ -532,6 +584,35 @@ class DbService:
                 return
             project.stage = stage
             db.commit()
+
+    def update_google_tokens(
+        self,
+        project_id: int,
+        access_token: str,
+        refresh_token: str | None,
+        expires_in: int | None,
+    ) -> None:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return
+            project.google_access_token = access_token
+            if refresh_token:
+                project.google_refresh_token = refresh_token
+            if expires_in:
+                project.token_expiry = dt.datetime.utcnow() + dt.timedelta(seconds=expires_in)
+            db.commit()
+
+    def get_google_token(self, project_id: int) -> dict[str, Any] | None:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return None
+            return {
+                "access_token": project.google_access_token,
+                "refresh_token": project.google_refresh_token,
+                "token_expiry": project.token_expiry,
+            }
 
     def add_canvas_item(self, project_id: int, section: str, text: str, is_ai: bool = False) -> None:
         with SessionLocal() as db:
@@ -744,6 +825,9 @@ class DbService:
 
     def update_assumption_title(self, assumption_id: int, new_title: str) -> None:
         self.update_assumption(assumption_id, {"title": new_title})
+
+    def update_assumption_text(self, assumption_id: int, new_text: str) -> None:
+        self.update_assumption(assumption_id, {"title": new_text})
 
     def delete_assumption(self, assumption_id: int) -> None:
         with SessionLocal() as db:

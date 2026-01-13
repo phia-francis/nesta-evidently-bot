@@ -11,6 +11,36 @@ class UIManager:
     )
 
     @staticmethod
+    def _nesta_header(title: str, subtitle: str) -> list[dict[str, Any]]:
+        return [
+            {"type": "header", "text": {"type": "plain_text", "text": title}},
+            {"type": "context", "elements": [{"type": "mrkdwn", "text": subtitle}]},
+            {"type": "divider"},
+        ]
+
+    @staticmethod
+    def _nesta_card(
+        title: str,
+        status_emoji: str,
+        fields_dict: dict[str, str],
+        button_text: str,
+        action_id: str,
+        value: str,
+    ) -> dict[str, Any]:
+        fields = [{"type": "mrkdwn", "text": f"*{label}*\n{text}"} for label, text in fields_dict.items()]
+        return {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*{status_emoji} {title}*"},
+            "fields": fields,
+            "accessory": {
+                "type": "button",
+                "text": {"type": "plain_text", "text": button_text},
+                "action_id": action_id,
+                "value": value,
+            },
+        }
+
+    @staticmethod
     def get_home_view(
         user_id: str,
         project: dict[str, Any] | None,
@@ -426,6 +456,23 @@ class UIManager:
             return blocks
 
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Project Roadmap (Now / Next / Later)*"}})
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "📄 Import from Drive"},
+                        "action_id": "open_drive_import_modal",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "✨ Magic Paste (Miro/Asana)"},
+                        "action_id": "open_magic_paste_modal",
+                    },
+                ],
+            }
+        )
 
         lanes = {"Now": [], "Next": [], "Later": []}
         for assumption in project.get("assumptions", []):
@@ -836,40 +883,62 @@ class UIManager:
                     )
         else:
             integrations = project.get("integrations") or {}
-            blocks.append({"type": "header", "text": {"type": "plain_text", "text": "🔗 Integrations"}})
+            blocks.append({"type": "header", "text": {"type": "plain_text", "text": "🔌 Integrations"}})
 
             drive_connected = integrations.get("drive", {}).get("connected")
-            drive_status = "✅ Connected" if drive_connected else "⚪ Disconnected"
-            drive_action_text = "Manage" if drive_connected else "Connect"
+            drive_status = "🟢 Connected" if drive_connected else "⚪ Not Connected"
+            blocks.append(
+                UIManager._nesta_card(
+                    title="Google Drive",
+                    status_emoji="📁",
+                    fields_dict={"Status": drive_status},
+                    button_text="Configure",
+                    action_id="open_integration_modal_drive",
+                    value="drive",
+                )
+            )
             blocks.append(
                 {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*Google Drive*\n{drive_status}"},
-                    "accessory": {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": drive_action_text},
-                        "action_id": "connect_drive",
-                    },
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "Connect Google Drive"},
+                            "action_id": "connect_google_drive",
+                            "style": "primary" if not drive_connected else "default",
+                        }
+                    ],
                 }
             )
 
             asana_connected = integrations.get("asana", {}).get("connected")
-            asana_status = "✅ Connected" if asana_connected else "⚪ Disconnected"
-            asana_action_text = "Manage" if asana_connected else "Connect"
+            asana_status = "🟢 Connected" if asana_connected else "⚪ Not Connected"
             blocks.append(
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*Asana*\n{asana_status}"},
-                    "accessory": {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": asana_action_text},
-                        "action_id": "connect_asana",
-                    },
-                }
+                UIManager._nesta_card(
+                    title="Asana",
+                    status_emoji="📋",
+                    fields_dict={"Status": asana_status},
+                    button_text="Configure",
+                    action_id="open_integration_modal_asana",
+                    value="asana",
+                )
             )
+
+            miro_connected = integrations.get("miro", {}).get("connected")
+            miro_status = "🟢 Connected" if miro_connected else "⚪ Not Connected"
+            blocks.append(
+                UIManager._nesta_card(
+                    title="Miro",
+                    status_emoji="🧩",
+                    fields_dict={"Status": miro_status},
+                    button_text="Configure",
+                    action_id="open_integration_modal_miro",
+                    value="miro",
+                )
+            )
+            blocks.append({"type": "divider"})
             channel_id = project.get("channel_id")
             channel_text = f"Linked channel: <#{channel_id}>" if channel_id else "No channel linked yet."
-            blocks.append({"type": "divider"})
             blocks.append(
                 {
                     "type": "section",
@@ -895,6 +964,7 @@ class UIManager:
             )
 
         blocks.append({"type": "divider"})
+        blocks.append({"type": "header", "text": {"type": "plain_text", "text": "Settings & Danger Zone"}})
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Settings*"}})
         blocks.append(
             {
@@ -1015,20 +1085,21 @@ class UIManager:
 
     @staticmethod
     def render_project_hub(projects: list[dict[str, Any]]) -> dict:
-        blocks: list[dict[str, Any]] = [
-            {"type": "header", "text": {"type": "plain_text", "text": "Your Projects"}},
+        blocks: list[dict[str, Any]] = []
+        blocks.extend(UIManager._nesta_header("🏛️ Discovery Hub", "Manage your missions and evidence."))
+        blocks.append(
             {
                 "type": "actions",
                 "elements": [
                     {
                         "type": "button",
-                        "text": {"type": "plain_text", "text": "Create Project"},
+                        "text": {"type": "plain_text", "text": "➕ Start New Mission"},
                         "action_id": "open_create_project_modal",
                         "style": "primary",
                     }
                 ],
-            },
-        ]
+            }
+        )
         if not projects:
             blocks.append(
                 {
@@ -1039,21 +1110,19 @@ class UIManager:
             return {"type": "home", "blocks": blocks}
 
         for project in projects:
+            stage = (project.get("stage") or "Define").lower()
+            status_emoji = {"define": "⚪", "develop": "🔵", "deliver": "🟢"}.get(stage, "⚪")
+            mission = project.get("mission") or "Mission not set"
             channel_text = f"<#{project['channel_id']}>" if project.get("channel_id") else "No channel linked"
-            role = project.get("role", "member")
             blocks.append(
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*{project['name']}*\nRole: {role} • {channel_text}",
-                    },
-                    "accessory": {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Open"},
-                        "action_id": "open_project_dashboard",
-                        "value": str(project["id"]),
-                    },
-                }
+                UIManager._nesta_card(
+                    title=project["name"],
+                    status_emoji=status_emoji,
+                    fields_dict={"Mission": mission, "Channel": channel_text},
+                    button_text="Open Dashboard",
+                    action_id="open_project_dashboard",
+                    value=str(project["id"]),
+                )
             )
+            blocks.append({"type": "divider"})
         return {"type": "home", "blocks": blocks}
