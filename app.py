@@ -437,7 +437,7 @@ def apply_channel_template(client, channel_id: str, tabs: list[str]) -> None:
 def update_home_tab(client, event, logger):  # noqa: ANN001
     try:
         user_id = event["user"]
-        publish_home_tab_async(client, user_id)
+        publish_home_tab_hub(client, user_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Error publishing home tab: %s", exc, exc_info=True)
 
@@ -445,7 +445,7 @@ def update_home_tab(client, event, logger):  # noqa: ANN001
 def app_home_opened(client, event, logger):  # noqa: ANN001
     try:
         user_id = event["user"]
-        publish_home_tab_async(client, user_id)
+        publish_home_tab_hub(client, user_id)
     except Exception as exc:  # noqa: BLE001
         if logger:
             logger.error("Error publishing home tab: %s", exc, exc_info=True)
@@ -489,6 +489,12 @@ def publish_home_tab(
         next_best_actions,
         experiment_page,
     )
+    client.views_publish(user_id=user_id, view=view)
+
+
+def publish_home_tab_hub(client, user_id: str) -> None:
+    projects = db_service.get_user_projects(user_id)
+    view = UIManager.render_project_hub(projects)
     client.views_publish(user_id=user_id, view=view)
 
 
@@ -543,7 +549,7 @@ def publish_home_tab_async(
 def refresh_home(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
-    publish_home_tab_async(client, user_id)
+    publish_home_tab_hub(client, user_id)
 
 
 @app.action(re.compile(r"^(nav|tab)_"))
@@ -552,6 +558,26 @@ def handle_navigation(ack, body, client):  # noqa: ANN001
     user_id = body["user"]["id"]
     tab = body["actions"][0]["value"]
     publish_home_tab_async(client, user_id, tab)
+
+
+@app.action("open_project_dashboard")
+def open_project_dashboard(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project_id = int(body["actions"][0]["value"])
+    projects = db_service.get_user_projects(user_id)
+    if not any(project["id"] == project_id for project in projects):
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="You don't have access to that project.")
+        return
+    db_service.set_active_project(user_id, project_id)
+    publish_home_tab_async(client, user_id, "overview")
+
+
+@app.action("back_to_hub")
+def back_to_hub(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    publish_home_tab_hub(client, user_id)
 
 
 @app.action("setup_step_1")
@@ -1325,6 +1351,33 @@ def open_edit_assumption_modal(client, trigger_id: str, assumption: dict) -> Non
     )
 
 
+def open_edit_assumption_text_modal(client, trigger_id: str, assumption: dict) -> None:
+    client.views_open(
+        trigger_id=trigger_id,
+        view={
+            "type": "modal",
+            "callback_id": "edit_assumption_text_submit",
+            "private_metadata": str(assumption["id"]),
+            "title": {"type": "plain_text", "text": "Edit Assumption"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "submit": {"type": "plain_text", "text": "Save"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "assumption_text",
+                    "label": {"type": "plain_text", "text": "Assumption text"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "text_input",
+                        "initial_value": assumption.get("title", ""),
+                        "multiline": True,
+                    },
+                }
+            ],
+        },
+    )
+
+
 @app.action("open_create_assumption")
 @app.action("open_add_assumption")
 def open_create_assumption_modal(ack, body, client):  # noqa: ANN001
@@ -1345,6 +1398,21 @@ def open_edit_assumption(ack, body, client):  # noqa: ANN001
         )
         return
     open_edit_assumption_modal(client, body["trigger_id"], assumption)
+
+
+@app.action("edit_assumption_text")
+def open_edit_assumption_text(ack, body, client):  # noqa: ANN001
+    ack()
+    assumption_id = int(body["actions"][0]["value"])
+    assumption = db_service.get_assumption(assumption_id)
+    if not assumption:
+        client.chat_postEphemeral(
+            channel=body["user"]["id"],
+            user=body["user"]["id"],
+            text="That roadmap item could not be found.",
+        )
+        return
+    open_edit_assumption_text_modal(client, body["trigger_id"], assumption)
 
 
 @app.action("add_canvas_item")
@@ -1560,6 +1628,7 @@ def _set_next_active_project(user_id: str, excluded_project_id: int | None = Non
 
 
 @app.action("open_edit_project")
+@app.action("open_edit_project_modal")
 def open_edit_project(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
@@ -1610,6 +1679,45 @@ def open_edit_project(ack, body, client):  # noqa: ANN001
             ],
         },
     )
+
+
+def _handle_project_management_action(ack, body, client, action_name: str) -> None:  # noqa: ANN001
+    """Helper to consolidate project management action logic."""
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+
+    if action_name == "archive":
+        db_service.archive_project(project["id"])
+    elif action_name == "leave":
+        member_count = db_service.count_project_members(project["id"])
+        if member_count <= 1:
+            db_service.archive_project(project["id"])
+        else:
+            db_service.remove_project_member(project["id"], user_id)
+    elif action_name == "delete":
+        db_service.delete_project(project["id"])
+
+    db_service.clear_active_project(user_id)
+    publish_home_tab_hub(client, user_id)
+
+
+@app.action("archive_project")
+def archive_project(ack, body, client):  # noqa: ANN001
+    _handle_project_management_action(ack, body, client, "archive")
+
+
+@app.action("leave_project")
+def leave_project(ack, body, client):  # noqa: ANN001
+    _handle_project_management_action(ack, body, client, "leave")
+
+
+@app.action("delete_project_confirm")
+def delete_project_confirm(ack, body, client):  # noqa: ANN001
+    _handle_project_management_action(ack, body, client, "delete")
 
 
 @app.view("edit_project_submit")
@@ -2191,6 +2299,20 @@ def handle_edit_assumption_submit(ack, body, client, logger):  # noqa: ANN001
         logger.error("Failed to update assumption: %s", exc, exc_info=True)
 
 
+@app.view("edit_assumption_text_submit")
+def handle_edit_assumption_text_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    assumption_id = int(body["view"]["private_metadata"])
+    try:
+        values = body["view"]["state"]["values"]
+        title = values["assumption_text"]["text_input"]["value"]
+        db_service.update_assumption_title(assumption_id, title)
+        publish_home_tab_async(client, user_id, "roadmap:roadmap")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to update assumption text: %s", exc, exc_info=True)
+
+
 @app.action("design_experiment")
 def open_experiment_browser(ack, body, client):  # noqa: ANN001
     ack()
@@ -2491,6 +2613,23 @@ def open_update_experiment_modal_action(ack, body, client):  # noqa: ANN001
         )
         return
     open_update_experiment_modal(client, body["trigger_id"], experiment)
+
+
+@app.action("delete_experiment")
+def delete_experiment(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    experiment_id = int(body["actions"][0]["value"])
+    experiment = db_service.get_experiment(experiment_id)
+    if not experiment:
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text="That experiment could not be found.",
+        )
+        return
+    db_service.delete_experiment(experiment_id)
+    publish_home_tab_async(client, user_id, "experiments:active")
 
 
 ASANA_DATASET_LINK_PREFIX = "asana:"
@@ -3081,6 +3220,12 @@ def handle_assumption_overflow(ack, body, client, logger):  # noqa: ANN001
             db_service.delete_assumption(int(assumption_id))
             client.chat_postEphemeral(channel=user_id, user=user_id, text="Assumption deleted.")
             publish_home_tab_async(client, user_id, "roadmap:roadmap")
+        elif action == "edit_text":
+            assumption = db_service.get_assumption(int(assumption_id))
+            if not assumption:
+                client.chat_postEphemeral(channel=user_id, user=user_id, text="Assumption not found.")
+                return
+            open_edit_assumption_text_modal(client, body["trigger_id"], assumption)
         elif action == "exp":
             assumption = db_service.get_assumption(int(assumption_id))
             if not assumption:
