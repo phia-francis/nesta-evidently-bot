@@ -396,6 +396,18 @@ class DbService:
             ).all()
             return [{"name": m.project.name, "id": m.project_id} for m in memberships if m.project]
 
+    def find_project_by_fuzzy_name(self, name: str) -> int | None:
+        if not name:
+            return None
+        with SessionLocal() as db:
+            project = (
+                db.query(Project)
+                .filter(Project.name.ilike(f"%{name}%"))
+                .order_by(Project.id.asc())
+                .first()
+            )
+            return project.id if project else None
+
     def add_project_member(self, project_id: int, user_id: str, role: str = "member") -> bool:
         with SessionLocal() as db:
             existing = (
@@ -650,6 +662,14 @@ class DbService:
 
     def update_assumption_title(self, assumption_id: int, new_title: str) -> None:
         self.update_assumption(assumption_id, {"title": new_title})
+
+    def delete_assumption(self, assumption_id: int) -> None:
+        with SessionLocal() as db:
+            assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
+            if not assumption:
+                return
+            db.delete(assumption)
+            db.commit()
 
     def get_experiment(self, experiment_id: int) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
