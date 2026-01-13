@@ -128,6 +128,9 @@ class Experiment(Base):
     current_value = Column(String(100))
     dataset_link = Column(String(255))
 
+    start_date = Column(TIMESTAMP)
+    end_date = Column(TIMESTAMP)
+
     project = relationship("Project", back_populates="experiments")
 
 
