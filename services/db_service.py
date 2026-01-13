@@ -388,6 +388,28 @@ class DbService:
             )
             return [self._serialize_project(project) for project in projects]
 
+    def get_all_projects_with_counts(self) -> list[Dict[str, Any]]:
+        with SessionLocal() as db:
+            projects = db.query(Project).options(joinedload(Project.members)).all()
+            return [
+                {
+                    "id": project.id,
+                    "name": project.name,
+                    "status": project.status,
+                    "member_count": len(project.members or []),
+                }
+                for project in projects
+            ]
+
+    def delete_empty_projects(self) -> int:
+        with SessionLocal() as db:
+            projects = db.query(Project).options(joinedload(Project.members)).all()
+            empty_projects = [project for project in projects if len(project.members or []) == 0]
+            for project in empty_projects:
+                db.delete(project)
+            db.commit()
+            return len(empty_projects)
+
     def update_project_context(self, project_id: int, context_summary: str) -> None:
         with SessionLocal() as db:
             project = db.query(Project).filter(Project.id == project_id).first()

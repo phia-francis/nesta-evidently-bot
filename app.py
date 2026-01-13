@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -77,6 +78,7 @@ logger = logging.getLogger(__name__)
 
 MAX_ASANA_PAYLOAD_ITEM_LENGTH = 100
 CHANNEL_PREFIX = "evidently-"
+ADMIN_USER_ID = os.environ.get("ADMIN_USER")
 
 ConfigManager().validate()
 
@@ -532,7 +534,7 @@ def publish_home_tab(
 
 def publish_home_tab_hub(client, user_id: str) -> None:
     projects = db_service.get_user_projects(user_id)
-    view = UIManager.render_project_hub(projects)
+    view = UIManager.render_project_hub(projects, user_id, ADMIN_USER_ID)
     client.views_publish(user_id=user_id, view=view)
 
 
@@ -616,6 +618,82 @@ def back_to_hub(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
     publish_home_tab_hub(client, user_id)
+
+
+@app.action("open_admin_dashboard")
+def open_admin_dashboard(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to access this dashboard.")
+        return
+    all_projects = db_service.get_all_projects_with_counts()
+    view = UIManager.render_admin_dashboard(all_projects)
+    client.views_publish(user_id=user_id, view=view)
+
+
+@app.action("admin_purge_confirm")
+def admin_purge_confirm(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to perform this action.")
+        return
+    all_projects = db_service.get_all_projects_with_counts()
+    empty_count = sum(1 for project in all_projects if project.get("member_count", 0) == 0)
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "admin_purge_submit",
+            "title": {"type": "plain_text", "text": "Confirm Purge"},
+            "submit": {"type": "plain_text", "text": "Purge"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "private_metadata": json.dumps({"empty_count": empty_count}),
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"Are you sure you want to delete *{empty_count}* empty projects?",
+                    },
+                }
+            ],
+        },
+    )
+
+
+@app.view("admin_purge_submit")
+def admin_purge_submit(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to perform this action.")
+        return
+    deleted_count = db_service.delete_empty_projects()
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text=f"✅ Deleted {deleted_count} empty project(s).",
+    )
+    all_projects = db_service.get_all_projects_with_counts()
+    view = UIManager.render_admin_dashboard(all_projects)
+    client.views_publish(user_id=user_id, view=view)
+
+
+@app.action("admin_delete_project")
+def admin_delete_project(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to perform this action.")
+        return
+    project_id = int(body["actions"][0]["value"])
+    db_service.delete_project(project_id)
+    client.chat_postEphemeral(channel=user_id, user=user_id, text="Project deleted.")
+    all_projects = db_service.get_all_projects_with_counts()
+    view = UIManager.render_admin_dashboard(all_projects)
+    client.views_publish(user_id=user_id, view=view)
 
 
 @app.action("setup_step_1")
@@ -1916,6 +1994,98 @@ def handle_edit_project_submit(ack, body, client, logger):  # noqa: ANN001
         publish_home_tab_async(client, user_id)
     except Exception:  # noqa: BLE001
         logger.error("Failed to update project details", exc_info=True)
+
+
+@app.view("edit_project_submission")
+def handle_edit_project_submission(ack, body, client, logger):  # noqa: ANN001
+    user_id = body["user"]["id"]
+    project_id = None
+    try:
+        project_id = int(body["view"].get("private_metadata", "0"))
+    except ValueError:
+        project_id = None
+    if not project_id:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Unable to locate that project.")
+        ack()
+        return
+    try:
+        values = body["view"]["state"]["values"]
+        name = values["name_block"]["name_input"]["value"]
+        description = values["description_block"]["description_input"]["value"]
+        mission = values["mission_block"]["mission_input"]["value"]
+        db_service.update_project(project_id, {"name": name, "mission": mission, "description": description})
+        publish_home_tab_async(client, user_id, "overview")
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to update project details", exc_info=True)
+    ack()
+
+
+@app.view("magic_import_submission")
+def handle_magic_import_submission(ack, body, client, logger):  # noqa: ANN001
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        ack()
+        return
+    values = body["view"]["state"]["values"]
+    text_input = ""
+    for block in values.values():
+        for action in block.values():
+            if isinstance(action, dict) and "value" in action:
+                text_input = action["value"]
+                break
+        if text_input:
+            break
+    if not text_input:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please provide text to import.")
+        ack()
+        return
+    try:
+        if hasattr(ai_service, "extract_assumptions"):
+            assumptions = ai_service.extract_assumptions(text_input)
+        else:
+            assumptions = ai_extractor.extract_assumptions(text_input)
+        saved = save_assumptions_from_text(project["id"], assumptions)
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text=f"Imported {saved} assumptions from the magic import.",
+        )
+        publish_home_tab_async(client, user_id, "roadmap:roadmap")
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to import assumptions from magic import", exc_info=True)
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Magic import failed. Please try again.")
+    ack()
+
+
+@app.view("invite_member_submission")
+def handle_invite_member_submission(ack, body, client, logger):  # noqa: ANN001
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        ack()
+        return
+    selected_user = body["view"]["state"]["values"]["member_select"]["selected_member"]["selected_user"]
+    try:
+        added = db_service.add_project_member(project["id"], selected_user)
+        if added:
+            try:
+                client.chat_postMessage(
+                    channel=selected_user,
+                    text=f"You're now a member of the Evidently project *{project['name']}*.",
+                )
+            except Exception:  # noqa: BLE001
+                logger.debug("Unable to send DM to invited member.", exc_info=True)
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Teammate added to the project.")
+        else:
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="That teammate is already in the project.")
+        publish_home_tab_async(client, user_id, "team:decision")
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to add project member", exc_info=True)
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Unable to add that teammate right now.")
+    ack()
 
 
 @app.action("confirm_archive_project")
