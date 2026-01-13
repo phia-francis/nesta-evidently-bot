@@ -1681,43 +1681,43 @@ def open_edit_project(ack, body, client):  # noqa: ANN001
     )
 
 
-@app.action("archive_project")
-def archive_project(ack, body, client):  # noqa: ANN001
+def _handle_project_management_action(ack, body, client, action_name: str) -> None:  # noqa: ANN001
+    """Helper to consolidate project management action logic."""
     ack()
     user_id = body["user"]["id"]
     project = db_service.get_active_project(user_id)
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
         return
-    db_service.archive_project(project["id"])
+
+    if action_name == "archive":
+        db_service.archive_project(project["id"])
+    elif action_name == "leave":
+        member_count = db_service.count_project_members(project["id"])
+        if member_count <= 1:
+            db_service.archive_project(project["id"])
+        else:
+            db_service.remove_project_member(project["id"], user_id)
+    elif action_name == "delete":
+        db_service.delete_project(project["id"])
+
     db_service.clear_active_project(user_id)
     publish_home_tab_hub(client, user_id)
+
+
+@app.action("archive_project")
+def archive_project(ack, body, client):  # noqa: ANN001
+    _handle_project_management_action(ack, body, client, "archive")
 
 
 @app.action("leave_project")
 def leave_project(ack, body, client):  # noqa: ANN001
-    ack()
-    user_id = body["user"]["id"]
-    project = db_service.get_active_project(user_id)
-    if not project:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
-        return
-    db_service.remove_project_member(project["id"], user_id)
-    db_service.clear_active_project(user_id)
-    publish_home_tab_hub(client, user_id)
+    _handle_project_management_action(ack, body, client, "leave")
 
 
 @app.action("delete_project_confirm")
 def delete_project_confirm(ack, body, client):  # noqa: ANN001
-    ack()
-    user_id = body["user"]["id"]
-    project = db_service.get_active_project(user_id)
-    if not project:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
-        return
-    db_service.delete_project(project["id"])
-    db_service.clear_active_project(user_id)
-    publish_home_tab_hub(client, user_id)
+    _handle_project_management_action(ack, body, client, "delete")
 
 
 @app.view("edit_project_submit")

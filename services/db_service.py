@@ -469,6 +469,10 @@ class DbService:
             db.delete(membership)
             db.commit()
 
+    def count_project_members(self, project_id: int) -> int:
+        with SessionLocal() as db:
+            return db.query(ProjectMember).filter(ProjectMember.project_id == project_id).count()
+
     def find_project_by_fuzzy_name(self, name: str) -> int | None:
         """Find project by partial name match.
 
