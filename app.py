@@ -10,6 +10,7 @@ from urllib import error as url_error
 from urllib import request as url_request
 from aiohttp import web
 from apscheduler.schedulers.background import BackgroundScheduler
+import pandas as pd
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from slack_bolt import App
@@ -439,6 +440,15 @@ def update_home_tab(client, event, logger):  # noqa: ANN001
         logger.error("Error publishing home tab: %s", exc, exc_info=True)
 
 
+def app_home_opened(client, event, logger):  # noqa: ANN001
+    try:
+        user_id = event["user"]
+        publish_home_tab_async(client, user_id)
+    except Exception as exc:  # noqa: BLE001
+        if logger:
+            logger.error("Error publishing home tab: %s", exc, exc_info=True)
+
+
 @app.action("experiments_page_next")
 @app.action("experiments_page_prev")
 def handle_experiment_page_action(ack, body, client):  # noqa: ANN001
@@ -546,6 +556,101 @@ def handle_navigation(ack, body, client):  # noqa: ANN001
 def start_setup(ack, body, client):  # noqa: ANN001
     ack()
     client.views_open(trigger_id=body["trigger_id"], view=get_setup_step_1_modal())
+
+
+@app.action("open_create_project_modal")
+def open_create_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "create_project_submit",
+            "title": {"type": "plain_text", "text": "New Project"},
+            "blocks": [
+                # 1. Project Name Input
+                {
+                    "type": "input",
+                    "block_id": "name_block",
+                    "label": {"type": "plain_text", "text": "Project Name"},
+                    "element": {"type": "plain_text_input", "action_id": "name"},
+                },
+                # 2. THE MISSION DROPDOWN (This was likely missing)
+                {
+                    "type": "input",
+                    "block_id": "mission_block",
+                    "label": {"type": "plain_text", "text": "Primary Mission"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "mission_select",
+                        "placeholder": {"type": "plain_text", "text": "Select a mission"},
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "🟢 A Fairer Start (AFS)"}, "value": "AFS"},
+                            {"text": {"type": "plain_text", "text": "🍎 A Healthy Life (AHL)"}, "value": "AHL"},
+                            {"text": {"type": "plain_text", "text": "🌱 A Sustainable Future (ASF)"}, "value": "ASF"},
+                            {"text": {"type": "plain_text", "text": "🔭 Mission Discovery"}, "value": "Mission Discovery"},
+                            {"text": {"type": "plain_text", "text": "🔗 Mission Adjacent"}, "value": "Mission Adjacent"},
+                            {"text": {"type": "plain_text", "text": "⚔️ Cross-cutting"}, "value": "Cross-cutting"},
+                            {"text": {"type": "plain_text", "text": "📜 Policy"}, "value": "Policy"},
+                        ],
+                    },
+                },
+                # 3. Channel Setup
+                {
+                    "type": "section",
+                    "block_id": "channel_block",
+                    "text": {"type": "mrkdwn", "text": "*Channel Setup*"},
+                    "accessory": {
+                        "type": "radio_buttons",
+                        "action_id": "channel_action",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "Create new channel"}, "value": "create_new"},
+                            {"text": {"type": "plain_text", "text": "Use current channel"}, "value": "use_current"},
+                        ],
+                    },
+                },
+            ],
+            "submit": {"type": "plain_text", "text": "Launch"},
+        },
+    )
+
+
+@app.view("create_project_submit")
+def handle_create_project(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    values = body["view"]["state"]["values"]
+
+    # 1. Extract Values
+    name = values["name_block"]["name"]["value"]
+
+    # Extract Mission (Safety check ensures it doesn't crash if block is missing)
+    mission = None
+    if "mission_block" in values:
+        mission = values["mission_block"]["mission_select"]["selected_option"]["value"]
+
+    # Extract Channel Choice
+    channel_action = "create_new"
+    if "channel_block" in values:
+        channel_action = values["channel_block"]["channel_action"]["selected_option"]["value"]
+
+    # 2. Channel Creation Logic
+    channel_id = None
+    if channel_action == "create_new":
+        # Create channel logic... (keep your existing logic here)
+        clean_name = f"evidently-{name.lower().replace(' ', '-')}"[:80]
+        try:
+            c_resp = client.conversations_create(name=clean_name)
+            channel_id = c_resp["channel"]["id"]
+            client.conversations_invite(channel=channel_id, users=user_id)
+        except Exception:  # noqa: BLE001
+            pass  # Handle error
+
+    # 3. Create in DB (Pass the 'mission' variable!)
+    db_service.create_project(user_id, name, "", mission=mission, channel_id=channel_id)
+
+    # 4. Refresh Home
+    app_home_opened(client, {"user": user_id}, None)
 
 
 @app.action("create_collection_modal")
@@ -1360,6 +1465,177 @@ def link_channel_submit(ack, body, client, logger):  # noqa: ANN001
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Unable to link that channel right now.")
 
 
+def _set_next_active_project(user_id: str, excluded_project_id: int | None = None) -> None:
+    projects = db_service.get_user_projects(user_id)
+    for project in projects:
+        project_id = project.get("id")
+        if not project_id or (excluded_project_id and project_id == excluded_project_id):
+            continue
+        project_data = db_service.get_project(project_id)
+        if project_data and project_data.get("status") == "active":
+            db_service.set_active_project(user_id, project_id)
+            return
+    db_service.clear_active_project(user_id)
+
+
+@app.action("open_edit_project")
+def open_edit_project(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "edit_project_submit",
+            "title": {"type": "plain_text", "text": "Edit Project"},
+            "submit": {"type": "plain_text", "text": "Save"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "name_block",
+                    "label": {"type": "plain_text", "text": "Project Name"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "name_input",
+                        "initial_value": project.get("name", ""),
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "description_block",
+                    "label": {"type": "plain_text", "text": "Description"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "description_input",
+                        "multiline": True,
+                        "initial_value": project.get("description", ""),
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "mission_block",
+                    "label": {"type": "plain_text", "text": "Mission"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "mission_input",
+                        "initial_value": project.get("mission", "") or "",
+                    },
+                },
+            ],
+        },
+    )
+
+
+@app.view("edit_project_submit")
+def handle_edit_project_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    try:
+        values = body["view"]["state"]["values"]
+        name = values["name_block"]["name_input"]["value"]
+        description = values["description_block"]["description_input"]["value"]
+        mission = values["mission_block"]["mission_input"]["value"]
+        db_service.update_project_details(project["id"], name, description, mission)
+        publish_home_tab_async(client, user_id)
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to update project details", exc_info=True)
+
+
+@app.action("confirm_archive_project")
+def confirm_archive_project(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "archive_project_submit",
+            "private_metadata": str(project["id"]),
+            "title": {"type": "plain_text", "text": "Archive Project"},
+            "submit": {"type": "plain_text", "text": "Archive"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "Are you sure? This will hide the project.",
+                    },
+                }
+            ],
+        },
+    )
+
+
+@app.view("archive_project_submit")
+def handle_archive_project_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        project_id = int(body["view"]["private_metadata"])
+        db_service.archive_project(project_id)
+        _set_next_active_project(user_id, excluded_project_id=project_id)
+        publish_home_tab_async(client, user_id)
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to archive project", exc_info=True)
+
+
+@app.action("confirm_delete_project")
+def confirm_delete_project(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "delete_project_submit",
+            "private_metadata": str(project["id"]),
+            "title": {"type": "plain_text", "text": "Delete Project"},
+            "submit": {"type": "plain_text", "text": "Delete"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "Are you sure? This action cannot be undone.",
+                    },
+                }
+            ],
+        },
+    )
+
+
+@app.view("delete_project_submit")
+def handle_delete_project_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    try:
+        project_id = int(body["view"]["private_metadata"])
+        db_service.delete_project(project_id)
+        db_service.clear_active_project(user_id)
+        publish_home_tab_async(client, user_id)
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to delete project", exc_info=True)
+
+
 @app.action("open_create_channel")
 def open_create_channel(ack, body, client):  # noqa: ANN001
     ack()
@@ -1602,10 +1878,43 @@ def handle_bulk_sync_asana(ack, body, client, logger):  # noqa: ANN001
 @app.action("export_report")
 def handle_export_report(ack, body, client):  # noqa: ANN001
     ack()
+    action_value = body["actions"][0].get("value", "pdf")
     user_id = body["user"]["id"]
     project = db_service.get_active_project(user_id)
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    if action_value == "csv":
+        client.chat_postEphemeral(
+            channel=user_id,
+            user=user_id,
+            text="📤 Generating CSV export... please wait.",
+        )
+        assumptions = project.get("assumptions", [])
+        df = pd.DataFrame(assumptions)
+        df = df.reindex(columns=["id", "title", "lane", "validation_status", "confidence_score"])
+        buffer = io.BytesIO()
+        buffer.write(df.to_csv(index=False).encode("utf-8"))
+        buffer.seek(0)
+        response = client.conversations_open(users=user_id)
+        if not response.get("ok"):
+            client.chat_postEphemeral(
+                channel=user_id,
+                user=user_id,
+                text=(
+                    "Could not open a direct message to send the report. "
+                    f"Error: {response.get('error', 'Unknown error')}"
+                ),
+            )
+            return
+        dm_channel = response["channel"]["id"]
+        client.files_upload_v2(
+            channel=dm_channel,
+            file=buffer,
+            filename=f"{project['name'].lower().replace(' ', '-')}-assumptions.csv",
+            title="Evidently Assumptions Export",
+            initial_comment="Here is your assumptions export. 💾",
+        )
         return
     client.chat_postEphemeral(
         channel=user_id,
@@ -2448,6 +2757,18 @@ def handle_keep(ack, body, client, logger):  # noqa: ANN001
         logger.error("Error in handle_keep action: %s", exc, exc_info=True)
 
 
+@app.action("keep_testing")
+def handle_keep_testing(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    try:
+        user_id = body["user"]["id"]
+        assumption_id = body["actions"][0]["value"]
+        db_service.touch_assumption(int(assumption_id))
+        client.chat_postMessage(channel=user_id, text=f"🔄 Assumption {assumption_id} is still in testing.")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error in handle_keep_testing action: %s", exc, exc_info=True)
+
+
 @app.action("archive_assumption")
 def handle_archive(ack, body, client, logger):  # noqa: ANN001
     ack()
@@ -2769,6 +3090,68 @@ def daily_standup_job(client):  # noqa: ANN001
         )
 
 
+def check_stale_assumptions_job(client):  # noqa: ANN001
+    stale_assumptions = db_service.get_stale_assumptions()
+    for entry in stale_assumptions:
+        assumption = entry["assumption"]
+        project = entry["project"]
+        channel_id = project.get("channel_id")
+        if not channel_id:
+            owner_id = project.get("created_by")
+            if not owner_id:
+                continue
+            response = client.conversations_open(users=owner_id)
+            if not response.get("ok"):
+                logger.warning("Unable to open DM for stale assumption alert: %s", response.get("error"))
+                continue
+            channel_id = response["channel"]["id"]
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*⏰ Stale assumption check-in*\n"
+                        f"*Project:* {project['name']}\n"
+                        f"*Assumption:* {assumption.get('title', 'Untitled')}\n"
+                        f"*Lane:* {assumption.get('lane', 'Now')}\n"
+                        f"*Status:* {assumption.get('validation_status', 'Testing')}"
+                    ),
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Keep Testing"},
+                        "action_id": "keep_testing",
+                        "value": str(assumption["id"]),
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Validate"},
+                        "action_id": "keep_assumption",
+                        "value": str(assumption["id"]),
+                        "style": "primary",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Archive"},
+                        "action_id": "archive_assumption",
+                        "value": str(assumption["id"]),
+                        "style": "danger",
+                    },
+                ],
+            },
+        ]
+        client.chat_postMessage(
+            channel=channel_id,
+            text=f"Stale assumption reminder for {project['name']}.",
+            blocks=blocks,
+        )
+
+
 @app.action("update_status_running")
 def handle_status_running(ack, body, client):  # noqa: ANN001
     ack()
@@ -2834,6 +3217,15 @@ if Config.BACKUP_ENABLED:
         args=[app.client],
     )
     backup_scheduler.start()
+
+stale_assumption_scheduler = BackgroundScheduler()
+stale_assumption_scheduler.add_job(
+    check_stale_assumptions_job,
+    "interval",
+    hours=24,
+    args=[app.client],
+)
+stale_assumption_scheduler.start()
 
 
 # --- 8. START ---

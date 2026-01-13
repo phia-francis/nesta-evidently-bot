@@ -415,10 +415,17 @@ class UIManager:
                             "text": f"• {item['title']} (Density: {item.get('evidence_density', 0)} docs)",
                         },
                         "accessory": {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Edit"},
-                            "value": str(item["id"]),
-                            "action_id": "edit_assumption",
+                            "type": "overflow",
+                            "action_id": "assumption_overflow",
+                            "options": [
+                                {"text": {"type": "plain_text", "text": "Move to Now"}, "value": f"{item['id']}:Now"},
+                                {"text": {"type": "plain_text", "text": "Move to Next"}, "value": f"{item['id']}:Next"},
+                                {"text": {"type": "plain_text", "text": "Move to Later"}, "value": f"{item['id']}:Later"},
+                                {
+                                    "text": {"type": "plain_text", "text": "Design Experiment"},
+                                    "value": f"{item['id']}:exp",
+                                },
+                            ],
                         },
                     }
                 )
@@ -770,6 +777,63 @@ class UIManager:
                     "text": {"type": "plain_text", "text": asana_action_text},
                     "action_id": "connect_asana",
                 },
+            }
+        )
+        channel_id = project.get("channel_id")
+        channel_text = f"Linked channel: <#{channel_id}>" if channel_id else "No channel linked yet."
+        blocks.append({"type": "divider"})
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "*Slack Channel Integration*\n" + channel_text},
+            }
+        )
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Link Existing Channel"},
+                        "action_id": "open_link_channel",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Create New Channel"},
+                        "action_id": "open_create_channel",
+                    },
+                ],
+            }
+        )
+        blocks.append({"type": "divider"})
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "*⚠️ Danger Zone*"},
+            }
+        )
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Edit Project Details"},
+                        "action_id": "open_edit_project",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Archive Project"},
+                        "action_id": "confirm_archive_project",
+                        "style": "danger",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Delete Project"},
+                        "action_id": "confirm_delete_project",
+                        "style": "danger",
+                    },
+                ],
             }
         )
         return blocks

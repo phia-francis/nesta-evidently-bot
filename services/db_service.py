@@ -142,6 +142,7 @@ class Assumption(Base):
     source_id = Column(String(255))
     source_snippet = Column(Text)
     confidence_score = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
     project = relationship("Project", back_populates="assumptions")
     scores = relationship("DecisionScore", back_populates="assumption")
@@ -204,7 +205,14 @@ class DbService:
         inspector = inspect(engine)
         expected_tables = {
             "projects": {"stage", "integrations", "channel_id", "mission", "context_summary"},
-            "assumptions": {"validation_status", "evidence_density", "source_type", "source_id", "confidence_score"},
+            "assumptions": {
+                "validation_status",
+                "evidence_density",
+                "source_type",
+                "source_id",
+                "confidence_score",
+                "updated_at",
+            },
             "canvas_items": {"section", "text", "ai_generated"},
         }
         missing = []
@@ -315,6 +323,40 @@ class DbService:
             if not project:
                 return
             project.context_summary = context_summary
+            db.commit()
+
+    def update_project_details(self, project_id: int, name: str, description: str, mission: str) -> None:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return
+            project.name = name
+            project.description = description
+            project.mission = mission
+            db.commit()
+
+    def archive_project(self, project_id: int) -> None:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return
+            project.status = "archived"
+            db.commit()
+
+    def delete_project(self, project_id: int) -> None:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return
+            db.delete(project)
+            db.commit()
+
+    def clear_active_project(self, user_id: str) -> None:
+        with SessionLocal() as db:
+            state = db.query(UserState).filter(UserState.user_id == user_id).first()
+            if not state:
+                return
+            state.current_project_id = None
             db.commit()
 
     def get_active_project(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -583,6 +625,14 @@ class DbService:
             assumption.validation_status = status
             db.commit()
 
+    def touch_assumption(self, assumption_id: int) -> None:
+        with SessionLocal() as db:
+            assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
+            if not assumption:
+                return
+            assumption.updated_at = dt.datetime.utcnow()
+            db.commit()
+
     def update_assumption(self, assumption_id: int, data: dict) -> None:
         with SessionLocal() as db:
             assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
@@ -616,6 +666,31 @@ class DbService:
         with SessionLocal() as db:
             assumption = db.query(Assumption).filter(Assumption.id == assumption_id).first()
             return self._serialize_assumption(assumption) if assumption else None
+
+    def get_stale_assumptions(self, days_threshold: int = 14) -> list[Dict[str, Any]]:
+        cutoff = dt.datetime.utcnow() - dt.timedelta(days=days_threshold)
+        with SessionLocal() as db:
+            assumptions = (
+                db.query(Assumption)
+                .options(joinedload(Assumption.project))
+                .filter(Assumption.validation_status == "Testing", Assumption.updated_at < cutoff)
+                .all()
+            )
+            results = []
+            for assumption in assumptions:
+                project = assumption.project
+                results.append(
+                    {
+                        "assumption": self._serialize_assumption(assumption),
+                        "project": {
+                            "id": project.id,
+                            "name": project.name,
+                            "channel_id": project.channel_id,
+                            "created_by": project.created_by,
+                        },
+                    }
+                )
+            return results
 
     def create_decision_session(self, project_id: int, channel_id: str) -> int:
         with SessionLocal() as db:
@@ -737,4 +812,5 @@ class DbService:
             "source_id": assumption.source_id,
             "source_snippet": assumption.source_snippet,
             "confidence_score": assumption.confidence_score,
+            "updated_at": assumption.updated_at.isoformat() if assumption.updated_at else None,
         }
