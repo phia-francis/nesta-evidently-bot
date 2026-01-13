@@ -20,6 +20,33 @@ class ProjectStage(Enum):
         return obj
 
 
+class Mission(Enum):
+    AFS = ("🟢 A Fairer Start (AFS)", "AFS")
+    AHL = ("🍎 A Healthy Life (AHL)", "AHL")
+    ASF = ("🌱 A Sustainable Future (ASF)", "ASF")
+    DISCOVERY = ("🔭 Mission Discovery", "Mission Discovery")
+    ADJACENT = ("🔗 Mission Adjacent", "Mission Adjacent")
+    CROSS_CUTTING = ("⚔️ Cross-cutting", "Cross-cutting")
+    POLICY = ("📜 Policy", "Policy")
+
+    def __new__(cls, display_text: str, value: str) -> "Mission":
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj.display_text = display_text
+        return obj
+
+
+class ChannelAction(Enum):
+    CREATE_NEW = ("Create new channel", "create_new")
+    LINK_LATER = ("Link existing channel later", "link_later")
+
+    def __new__(cls, text: str, value: str) -> "ChannelAction":
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj.text = text
+        return obj
+
+
 def get_onboarding_welcome() -> dict:
     return {
         "type": "home",
@@ -94,13 +121,8 @@ def get_setup_step_2_modal(problem_statement: str) -> dict:
                     action_id="mission_select",
                     placeholder={"type": "plain_text", "text": "Select a mission"},
                     options=[
-                        Option(text=PlainTextObject(text="🟢 A Fairer Start (AFS)"), value="AFS"),
-                        Option(text=PlainTextObject(text="🍎 A Healthy Life (AHL)"), value="AHL"),
-                        Option(text=PlainTextObject(text="🌱 A Sustainable Future (ASF)"), value="ASF"),
-                        Option(text=PlainTextObject(text="🔭 Mission Discovery"), value="Mission Discovery"),
-                        Option(text=PlainTextObject(text="🔗 Mission Adjacent"), value="Mission Adjacent"),
-                        Option(text=PlainTextObject(text="⚔️ Cross-cutting"), value="Cross-cutting"),
-                        Option(text=PlainTextObject(text="📜 Policy"), value="Policy"),
+                        Option(text=PlainTextObject(text=mission.display_text), value=mission.value)
+                        for mission in Mission
                     ],
                 ),
             ).to_dict(),
@@ -110,10 +132,13 @@ def get_setup_step_2_modal(problem_statement: str) -> dict:
                 element=RadioButtonsElement(
                     action_id="channel_action",
                     options=[
-                        Option(text=PlainTextObject(text="Create new channel"), value="create_new"),
-                        Option(text=PlainTextObject(text="Link existing channel later"), value="link_later"),
+                        Option(text=PlainTextObject(text=action.text), value=action.value)
+                        for action in ChannelAction
                     ],
-                    initial_option=Option(text=PlainTextObject(text="Create new channel"), value="create_new"),
+                    initial_option=Option(
+                        text=PlainTextObject(text=ChannelAction.CREATE_NEW.text),
+                        value=ChannelAction.CREATE_NEW.value,
+                    ),
                 ),
             ).to_dict(),
             InputBlock(

@@ -16,6 +16,7 @@ from reportlab.pdfgen import canvas
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from slack_bolt.workflows.step import WorkflowStep
+from slack_sdk.errors import SlackApiError
 
 from blocks.ui_manager import UIManager
 from constants import (
@@ -70,6 +71,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 MAX_ASANA_PAYLOAD_ITEM_LENGTH = 100
+CHANNEL_PREFIX = "evidently-"
 
 ConfigManager().validate()
 
@@ -1103,7 +1105,7 @@ def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
 
         if channel_action == "create_new":
             clean_name = re.sub(r"[^a-z0-9-_]", "", name.lower().replace(" ", "-"))
-            channel_name = f"evidently-{clean_name}"[:80]
+            channel_name = f"{CHANNEL_PREFIX}{clean_name}"[:80]
             try:
                 c_resp = client.conversations_create(name=channel_name)
                 channel_id = c_resp["channel"]["id"]
@@ -1113,7 +1115,7 @@ def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
                     channel=channel_id,
                     text=f"👋 Welcome to the home of *{name}*! I'll post updates here.",
                 )
-            except Exception as exc:  # noqa: BLE001
+            except SlackApiError as exc:
                 logger.error("Failed to create channel %s: %s", channel_name, exc, exc_info=True)
                 client.chat_postEphemeral(
                     user=user_id,
@@ -1140,6 +1142,10 @@ def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
                 f"We've set your stage to *{stage}* and mission to *{mission}*.\n"
                 "Add your first assumption to start de-risking."
             ),
+        ]
+        if created_channel_name:
+            blocks.append(NestaUI.section(f"I've created <#{channel_id}> for your team."))
+        blocks.append(
             {
                 "type": "actions",
                 "elements": [
@@ -1149,13 +1155,8 @@ def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
                         "action_id": "open_create_assumption",
                     }
                 ],
-            },
-        ]
-        if created_channel_name:
-            blocks.insert(
-                2,
-                NestaUI.section(f"I've created <#{channel_id}> for your team."),
-            )
+            }
+        )
 
         client.chat_postMessage(
             channel=user_id,
