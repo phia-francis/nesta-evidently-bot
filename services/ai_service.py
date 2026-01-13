@@ -125,6 +125,29 @@ Conversation:
             logger.error("AI Analysis - General failure", exc_info=True)
             return {"error": f"Could not analyse thread: {exc}"}
 
+    def extract_assumptions(self, text: str) -> list[str]:
+        if not text:
+            return []
+        system_prompt = (
+            "Analyze the following text and extract a list of risky assumptions. "
+            "Return the result strictly as a raw JSON list of strings (e.g. ['Assumption 1', 'Assumption 2']). "
+            "Do not use Markdown formatting in the output."
+        )
+        try:
+            clean_text = self.redact_pii(text)
+            response = self.model.generate_content(f"{system_prompt}\n\n{clean_text}")
+            content = response.text.replace("```json", "").replace("```", "").strip()
+            parsed = json.loads(content or "[]")
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return []
+        except json.JSONDecodeError:
+            logger.exception("Failed to parse Gemini response for assumptions")
+            return []
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to extract assumptions via Gemini")
+            return []
+
     def generate_experiment_suggestions(self, assumption: str) -> str:
         """Suggest rapid experiments for a given assumption."""
         prompt = (

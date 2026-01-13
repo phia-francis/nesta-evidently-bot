@@ -1084,7 +1084,11 @@ class UIManager:
         }
 
     @staticmethod
-    def render_project_hub(projects: list[dict[str, Any]]) -> dict:
+    def render_project_hub(
+        projects: list[dict[str, Any]],
+        user_id: str,
+        admin_user_id: str | None = None,
+    ) -> dict:
         blocks: list[dict[str, Any]] = []
         blocks.extend(UIManager._nesta_header("🏛️ Discovery Hub", "Manage your missions and evidence."))
         blocks.append(
@@ -1107,6 +1111,20 @@ class UIManager:
                     "text": {"type": "mrkdwn", "text": "You don't have any projects yet."},
                 }
             )
+            if admin_user_id and user_id == admin_user_id:
+                blocks.append({"type": "divider"})
+                blocks.append(
+                    {
+                        "type": "actions",
+                        "elements": [
+                            {
+                                "type": "button",
+                                "text": {"type": "plain_text", "text": "🔐 Admin Dashboard"},
+                                "action_id": "open_admin_dashboard",
+                            }
+                        ],
+                    }
+                )
             return {"type": "home", "blocks": blocks}
 
         for project in projects:
@@ -1123,6 +1141,88 @@ class UIManager:
                     action_id="open_project_dashboard",
                     value=str(project["id"]),
                 )
+            )
+            blocks.append({"type": "divider"})
+        if admin_user_id and user_id == admin_user_id:
+            blocks.append({"type": "divider"})
+            blocks.append(
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "🔐 Admin Dashboard"},
+                            "action_id": "open_admin_dashboard",
+                        }
+                    ],
+                }
+            )
+        return {"type": "home", "blocks": blocks}
+
+    @staticmethod
+    def render_admin_dashboard(all_projects: list[dict[str, Any]]) -> dict:
+        total_projects = len(all_projects)
+        empty_projects = [project for project in all_projects if project.get("member_count", 0) == 0]
+
+        blocks: list[dict[str, Any]] = []
+        blocks.extend(UIManager._nesta_header("🔐 Super Admin Control Panel", "Manage and clean up projects."))
+        blocks.append(
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Total Projects:*\n{total_projects}"},
+                    {"type": "mrkdwn", "text": f"*Empty Projects:*\n{len(empty_projects)}"},
+                ],
+            }
+        )
+        blocks.append({"type": "divider"})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Danger Zone*"}})
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "🗑️ Purge 0-Member Projects"},
+                        "action_id": "admin_purge_confirm",
+                        "style": "danger",
+                    }
+                ],
+            }
+        )
+        blocks.append({"type": "divider"})
+        if not all_projects:
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "No projects found."},
+                }
+            )
+            return {"type": "home", "blocks": blocks}
+
+        for project in all_projects:
+            member_count = project.get("member_count", 0)
+            name = project.get("name") or "Untitled Project"
+            status = project.get("status") or "unknown"
+            if member_count == 0:
+                title_text = f"*⚠️ {name}*"
+            else:
+                title_text = f"*{name}*"
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"{title_text}\nStatus: {status} • Members: {member_count}",
+                    },
+                    "accessory": {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Delete"},
+                        "action_id": "admin_delete_project",
+                        "value": str(project.get("id")),
+                        "style": "danger",
+                    },
+                }
             )
             blocks.append({"type": "divider"})
         return {"type": "home", "blocks": blocks}

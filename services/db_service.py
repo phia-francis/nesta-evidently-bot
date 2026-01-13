@@ -5,7 +5,7 @@ import secrets
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, inspect, text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, func, inspect, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -387,6 +387,39 @@ class DbService:
                 .all()
             )
             return [self._serialize_project(project) for project in projects]
+
+    def get_all_projects_with_counts(self) -> list[Dict[str, Any]]:
+        with SessionLocal() as db:
+            results = (
+                db.query(
+                    Project.id,
+                    Project.name,
+                    Project.status,
+                    func.count(ProjectMember.id).label("member_count"),
+                )
+                .outerjoin(Project.members)
+                .group_by(Project.id, Project.name, Project.status)
+                .all()
+            )
+            return [
+                {
+                    "id": result.id,
+                    "name": result.name,
+                    "status": result.status,
+                    "member_count": result.member_count,
+                }
+                for result in results
+            ]
+
+    def delete_empty_projects(self) -> int:
+        with SessionLocal() as db:
+            subquery = db.query(ProjectMember.project_id).distinct().subquery()
+            empty_projects_query = db.query(Project).filter(~Project.id.in_(subquery))
+            deleted_count = empty_projects_query.count()
+            if deleted_count:
+                empty_projects_query.delete(synchronize_session=False)
+                db.commit()
+            return deleted_count
 
     def update_project_context(self, project_id: int, context_summary: str) -> None:
         with SessionLocal() as db:
