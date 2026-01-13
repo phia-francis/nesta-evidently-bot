@@ -232,19 +232,40 @@ class DbService:
             )
 
     def run_manual_patch(self) -> str:
+        """
+        Manually adds missing columns to ALL tables to prevent crashes.
+        Safe to run multiple times (uses IF NOT EXISTS).
+        """
         try:
             with engine.connect() as connection:
                 with connection.begin():
+                    # --- 1. Fix PROJECTS Table ---
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS mission TEXT;"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS channel_id VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS stage VARCHAR(50) DEFAULT 'Define';"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS integrations JSON DEFAULT '{}';"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS context_summary TEXT;"))
-            return "✅ Database patched successfully! Columns added."
+
+                    # --- 2. Fix ASSUMPTIONS Table (The one crashing now) ---
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(50) DEFAULT 'Untested';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_density INTEGER DEFAULT 0;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_type VARCHAR(50);"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_id VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_snippet TEXT;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 0;"))
+
+                    # --- 3. Fix EXPERIMENTS Table (Prevent future crashes) ---
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS hypothesis TEXT;"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS kpi VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Planned';"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS start_date TIMESTAMP;"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS end_date TIMESTAMP;"))
+
+            return "✅ Database FULLY patched! (Projects, Assumptions, Experiments)"
         except SQLAlchemyError as exc:
             logging.exception("Manual database patch failed.")
             return f"❌ Patch failed: {exc}"
-
+            
     def create_project(
         self,
         user_id: str,
