@@ -230,6 +230,21 @@ class DbService:
                 ", ".join(missing),
             )
 
+    def run_manual_patch(self) -> str:
+        from sqlalchemy import text
+
+        try:
+            with engine.connect() as connection:
+                with connection.begin():
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS mission TEXT;"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS channel_id VARCHAR(50);"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS stage VARCHAR(50) DEFAULT 'Define';"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS integrations JSON DEFAULT '{}';"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS context_summary TEXT;"))
+            return "✅ Database patched successfully! Columns added."
+        except Exception as exc:  # noqa: BLE001
+            return f"❌ Patch failed: {exc}"
+
     def create_project(
         self,
         user_id: str,
