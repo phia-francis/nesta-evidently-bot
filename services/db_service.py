@@ -1,6 +1,7 @@
 import datetime as dt
 import logging
 import os
+import secrets
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
@@ -194,6 +195,15 @@ class UserState(Base):
 
     user_id = Column(String(255), primary_key=True)
     current_project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+
+
+class OAuthState(Base):
+    __tablename__ = "oauth_states"
+
+    state = Column(String(255), primary_key=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    user_id = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
 
 
 class DbService:
@@ -481,6 +491,24 @@ class DbService:
         with SessionLocal() as db:
             self._set_active_project(db, user_id, project_id)
             db.commit()
+
+    def create_oauth_state(self, user_id: str, project_id: int) -> str:
+        state = secrets.token_urlsafe(32)
+        with SessionLocal() as db:
+            oauth_state = OAuthState(state=state, project_id=project_id, user_id=user_id)
+            db.add(oauth_state)
+            db.commit()
+        return state
+
+    def consume_oauth_state(self, state: str) -> dict[str, Any] | None:
+        with SessionLocal() as db:
+            record = db.query(OAuthState).filter(OAuthState.state == state).first()
+            if not record:
+                return None
+            payload = {"project_id": record.project_id, "user_id": record.user_id}
+            db.delete(record)
+            db.commit()
+            return payload
 
     def get_user_projects(self, user_id: str) -> list[dict[str, Any]]:
         with SessionLocal() as db:

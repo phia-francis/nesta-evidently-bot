@@ -20,7 +20,7 @@ class GoogleService:
         self.client_secret = Config.GOOGLE_CLIENT_SECRET
         self.redirect_uri = Config.GOOGLE_REDIRECT_URI
 
-    def get_auth_url(self, project_id: int) -> str:
+    def get_auth_url(self, state: str) -> str:
         if not self.client_id or not self.redirect_uri:
             raise ValueError("Google OAuth client settings are missing.")
         params = {
@@ -30,7 +30,7 @@ class GoogleService:
             "scope": "https://www.googleapis.com/auth/drive.readonly",
             "access_type": "offline",
             "prompt": "consent",
-            "state": str(project_id),
+            "state": state,
         }
         return f"{self._AUTH_BASE_URL}?{urlencode(params)}"
 

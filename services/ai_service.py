@@ -347,12 +347,16 @@ class AiService:
             "Do not use Markdown formatting in the output."
         )
         try:
-            response = self.model.generate_content(f"{system_prompt}\n\n{text}")
+            clean_text = EvidenceAI.redact_pii(text)
+            response = self.model.generate_content(f"{system_prompt}\n\n{clean_text}")
             content = response.text.replace("```json", "").replace("```", "").strip()
             parsed = json.loads(content or "[]")
             if isinstance(parsed, list):
                 return [str(item).strip() for item in parsed if str(item).strip()]
             return []
+        except json.JSONDecodeError:
+            logger.exception("Failed to parse Gemini response for assumptions")
+            return []
         except Exception:  # noqa: BLE001
-            logger.exception("Failed to extract assumptions via OpenAI")
+            logger.exception("Failed to extract assumptions via Gemini")
             return []

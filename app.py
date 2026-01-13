@@ -13,6 +13,7 @@ from aiohttp import web
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask, Response, request
 import pandas as pd
+import requests
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from slack_bolt import App
@@ -62,6 +63,7 @@ from services.decision_service import DecisionRoomService
 from services.backup_service import BackupService
 from services.google_workspace_service import GoogleWorkspaceService
 from services.google_service import GoogleService
+from sqlalchemy.exc import SQLAlchemyError
 from services.integration_service import IntegrationService
 from services.ingestion_service import IngestionService
 from services.messenger_service import MessengerService
@@ -1483,7 +1485,7 @@ def handle_drive_import_submit(ack, body, client, logger):  # noqa: ANN001
                 refreshed.get("refresh_token", refresh_token),
                 refreshed.get("expires_in"),
             )
-        except Exception:
+        except requests.exceptions.RequestException:
             logger.exception("Failed to refresh Google token")
             client.chat_postEphemeral(
                 channel=user_id,
@@ -1493,7 +1495,7 @@ def handle_drive_import_submit(ack, body, client, logger):  # noqa: ANN001
             return
     try:
         content = google_service.fetch_file_content(file_id, access_token)
-    except Exception:
+    except (requests.exceptions.RequestException, ValueError):
         logger.exception("Failed to fetch Drive content")
         client.chat_postEphemeral(
             channel=user_id,
@@ -2149,7 +2151,8 @@ def connect_google_drive(ack, body, client):  # noqa: ANN001
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
         return
     try:
-        auth_url = google_service.get_auth_url(project["id"])
+        state = db_service.create_oauth_state(user_id, project["id"])
+        auth_url = google_service.get_auth_url(state)
     except ValueError:
         client.chat_postEphemeral(
             channel=user_id,
@@ -2199,8 +2202,8 @@ def handle_integration_modal_submit(ack, body, client, logger):  # noqa: ANN001
         if integration_type and project_id:
             db_service.add_integration_link(project_id, integration_type, external_id)
         publish_home_tab_async(client, user_id, "team:integrations")
-    except Exception:  # noqa: BLE001
-        logger.error("Failed to update integration settings", exc_info=True)
+    except (json.JSONDecodeError, ValueError, SQLAlchemyError):
+        logger.exception("Failed to update integration settings")
 
 
 @flask_app.route("/auth/callback/google")
@@ -2209,10 +2212,10 @@ def google_auth_callback() -> Response:
     state = request.args.get("state")
     if not code or not state:
         return Response("Missing code or state.", status=400)
-    try:
-        project_id = int(state)
-    except ValueError:
+    oauth_payload = db_service.consume_oauth_state(state)
+    if not oauth_payload:
         return Response("Invalid state.", status=400)
+    project_id = oauth_payload["project_id"]
     try:
         token_response = google_service.exchange_code(code)
         db_service.update_google_tokens(
@@ -2222,7 +2225,7 @@ def google_auth_callback() -> Response:
             token_response.get("expires_in"),
         )
         return Response("<h2>Connection Successful</h2>", status=200, mimetype="text/html")
-    except Exception:  # noqa: BLE001
+    except (requests.exceptions.RequestException, SQLAlchemyError, ValueError):
         logger.exception("Google OAuth callback failed")
         return Response("Connection failed.", status=500)
 
