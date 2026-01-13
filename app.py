@@ -14,6 +14,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from slack_bolt.workflows.step import WorkflowStep
 
 from blocks.ui_manager import UIManager
 from constants import (
@@ -89,12 +90,7 @@ except Exception:  # noqa: BLE001
 
 # --- WORKFLOW STEP: LOG EVIDENCE ---
 
-# 1. Define the Step
-ws = app.step("log_evidence")
-
-
-# 2. Configuration Modal (User sees this when building the workflow)
-@ws.edit
+# --- 1. Define the Workflow Functions First ---
 def edit_log_evidence(ack, step, configure):  # noqa: ANN001
     ack()
     configure(
@@ -126,8 +122,6 @@ def edit_log_evidence(ack, step, configure):  # noqa: ANN001
     )
 
 
-# 3. Save Configuration
-@ws.save
 def save_log_evidence(ack, view, update):  # noqa: ANN001
     ack()
     values = view["state"]["values"]
@@ -142,12 +136,10 @@ def save_log_evidence(ack, view, update):  # noqa: ANN001
     )
 
 
-# 4. Execution (Runs when the workflow triggers)
-@ws.execute
 def execute_log_evidence(step, complete, fail):  # noqa: ANN001
     inputs = step["inputs"]
-    project_name = inputs["project_name"]["value"]
-    evidence_text = inputs["evidence_text"]["value"]
+    project_name = inputs.get("project_name", {}).get("value")
+    evidence_text = inputs.get("evidence_text", {}).get("value")
 
     try:
         # Logic: Find project and add to 'Inbox' or 'Canvas'
@@ -162,6 +154,17 @@ def execute_log_evidence(step, complete, fail):  # noqa: ANN001
     except Exception as exc:  # noqa: BLE001
         fail(error={"message": str(exc)})
 
+
+# --- 2. Register the Step with All Listeners ---
+# This prevents the "listener is required" error
+ws = WorkflowStep(
+    callback_id="log_evidence",
+    edit=edit_log_evidence,
+    save=save_log_evidence,
+    execute=execute_log_evidence,
+)
+
+app.step(ws)
 
 CHANNEL_TAB_TEMPLATES = {
     "experiments": {"title": "Experiments", "emoji": "🧪"},
