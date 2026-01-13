@@ -5,6 +5,7 @@ import os
 import re
 import threading
 import time
+from functools import wraps
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -538,6 +539,19 @@ def publish_home_tab_hub(client, user_id: str) -> None:
     client.views_publish(user_id=user_id, view=view)
 
 
+def admin_required(func):  # noqa: ANN001
+    @wraps(func)
+    def decorated_function(ack, body, client, *args, **kwargs):  # noqa: ANN001
+        user_id = body["user"]["id"]
+        if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
+            ack()
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to perform this action.")
+            return None
+        return func(ack, body, client, *args, **kwargs)
+
+    return decorated_function
+
+
 def publish_home_tab_async(
     client,
     user_id: str,
@@ -621,24 +635,20 @@ def back_to_hub(ack, body, client):  # noqa: ANN001
 
 
 @app.action("open_admin_dashboard")
+@admin_required
 def open_admin_dashboard(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
-    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to access this dashboard.")
-        return
     all_projects = db_service.get_all_projects_with_counts()
     view = UIManager.render_admin_dashboard(all_projects)
     client.views_publish(user_id=user_id, view=view)
 
 
 @app.action("admin_purge_confirm")
+@admin_required
 def admin_purge_confirm(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
-    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to perform this action.")
-        return
     all_projects = db_service.get_all_projects_with_counts()
     empty_count = sum(1 for project in all_projects if project.get("member_count", 0) == 0)
     client.views_open(
@@ -664,12 +674,10 @@ def admin_purge_confirm(ack, body, client):  # noqa: ANN001
 
 
 @app.view("admin_purge_submit")
+@admin_required
 def admin_purge_submit(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
-    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to perform this action.")
-        return
     deleted_count = db_service.delete_empty_projects()
     client.chat_postEphemeral(
         channel=user_id,
@@ -682,12 +690,10 @@ def admin_purge_submit(ack, body, client):  # noqa: ANN001
 
 
 @app.action("admin_delete_project")
+@admin_required
 def admin_delete_project(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
-    if not ADMIN_USER_ID or user_id != ADMIN_USER_ID:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="You are not authorized to perform this action.")
-        return
     project_id = int(body["actions"][0]["value"])
     db_service.delete_project(project_id)
     client.chat_postEphemeral(channel=user_id, user=user_id, text="Project deleted.")
@@ -2028,24 +2034,16 @@ def handle_magic_import_submission(ack, body, client, logger):  # noqa: ANN001
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
         ack()
         return
-    values = body["view"]["state"]["values"]
-    text_input = ""
-    for block in values.values():
-        for action in block.values():
-            if isinstance(action, dict) and "value" in action:
-                text_input = action["value"]
-                break
-        if text_input:
-            break
-    if not text_input:
+    try:
+        values = body["view"]["state"]["values"]
+        text_input = values["magic_import_block"]["magic_import_input"]["value"]
+    except KeyError:
+        logger.error("Magic import submission missing expected input fields.")
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please provide text to import.")
         ack()
         return
     try:
-        if hasattr(ai_service, "extract_assumptions"):
-            assumptions = ai_service.extract_assumptions(text_input)
-        else:
-            assumptions = ai_extractor.extract_assumptions(text_input)
+        assumptions = ai_service.extract_assumptions(text_input)
         saved = save_assumptions_from_text(project["id"], assumptions)
         client.chat_postEphemeral(
             channel=user_id,
