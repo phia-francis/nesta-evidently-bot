@@ -643,8 +643,13 @@ def handle_create_project(ack, body, client):  # noqa: ANN001
             c_resp = client.conversations_create(name=clean_name)
             channel_id = c_resp["channel"]["id"]
             client.conversations_invite(channel=channel_id, users=user_id)
-        except Exception:  # noqa: BLE001
-            pass  # Handle error
+        except Exception as e:
+            logger.error("Failed to create channel '%s': %s", clean_name, e, exc_info=True)
+            client.chat_postEphemeral(
+                channel=user_id,
+                user=user_id,
+                text=f"I couldn't create a channel for your project. It might be a permissions issue or an invalid name. The project was created without a linked channel."
+            )
 
     # 3. Create in DB (Pass the 'mission' variable!)
     db_service.create_project(user_id, name, "", mission=mission, channel_id=channel_id)
