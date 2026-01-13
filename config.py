@@ -24,6 +24,7 @@ class Config:
     STANDUP_MINUTE = int(os.environ.get("STANDUP_MINUTE", 30))
     BACKUP_ENABLED = os.environ.get("BACKUP_ENABLED", "false").lower() == "true"
     BACKUP_CHANNEL = os.environ.get("BACKUP_CHANNEL", "")
+    ADMIN_USERS = [user_id.strip() for user_id in os.environ.get("ADMIN_USERS", "").split(",") if user_id.strip()]
 
     # Thresholds
     CONFIDENCE_THRESHOLD = float(os.environ.get("CONFIDENCE_THRESHOLD", 0.8))

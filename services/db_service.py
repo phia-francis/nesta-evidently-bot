@@ -4,9 +4,10 @@ import os
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, inspect
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, inspect, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, joinedload, relationship, sessionmaker
 
 from services.toolkit_service import ToolkitService
@@ -231,8 +232,6 @@ class DbService:
             )
 
     def run_manual_patch(self) -> str:
-        from sqlalchemy import text
-
         try:
             with engine.connect() as connection:
                 with connection.begin():
@@ -242,7 +241,8 @@ class DbService:
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS integrations JSON DEFAULT '{}';"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS context_summary TEXT;"))
             return "✅ Database patched successfully! Columns added."
-        except Exception as exc:  # noqa: BLE001
+        except SQLAlchemyError as exc:
+            logging.exception("Manual database patch failed.")
             return f"❌ Patch failed: {exc}"
 
     def create_project(
