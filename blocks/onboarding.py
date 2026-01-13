@@ -1,6 +1,6 @@
 from enum import Enum
 
-from slack_sdk.models.blocks import InputBlock, Option, PlainTextObject
+from slack_sdk.models.blocks import InputBlock, Option, PlainTextObject, StaticSelectElement
 from slack_sdk.models.blocks.block_elements import PlainTextInputElement, RadioButtonsElement
 
 from blocks.nesta_ui import NestaUI
@@ -17,6 +17,33 @@ class ProjectStage(Enum):
         obj = object.__new__(cls)
         obj._value_ = value
         obj.display_text = display_text
+        return obj
+
+
+class Mission(Enum):
+    AFS = ("🟢 A Fairer Start (AFS)", "AFS")
+    AHL = ("🍎 A Healthy Life (AHL)", "AHL")
+    ASF = ("🌱 A Sustainable Future (ASF)", "ASF")
+    DISCOVERY = ("🔭 Mission Discovery", "Mission Discovery")
+    ADJACENT = ("🔗 Mission Adjacent", "Mission Adjacent")
+    CROSS_CUTTING = ("⚔️ Cross-cutting", "Cross-cutting")
+    POLICY = ("📜 Policy", "Policy")
+
+    def __new__(cls, display_text: str, value: str) -> "Mission":
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj.display_text = display_text
+        return obj
+
+
+class ChannelAction(Enum):
+    CREATE_NEW = ("Create new channel", "create_new")
+    LINK_LATER = ("Link existing channel later", "link_later")
+
+    def __new__(cls, text: str, value: str) -> "ChannelAction":
+        obj = object.__new__(cls)
+        obj._value_ = value
+        obj.text = text
         return obj
 
 
@@ -86,6 +113,33 @@ def get_setup_step_2_modal(problem_statement: str) -> dict:
                 block_id="name_block",
                 label={"type": "plain_text", "text": "Project Name"},
                 element=PlainTextInputElement(action_id="name_input"),
+            ).to_dict(),
+            InputBlock(
+                block_id="mission_block",
+                label={"type": "plain_text", "text": "Primary Mission"},
+                element=StaticSelectElement(
+                    action_id="mission_select",
+                    placeholder={"type": "plain_text", "text": "Select a mission"},
+                    options=[
+                        Option(text=PlainTextObject(text=mission.display_text), value=mission.value)
+                        for mission in Mission
+                    ],
+                ),
+            ).to_dict(),
+            InputBlock(
+                block_id="channel_block",
+                label={"type": "plain_text", "text": "Channel Setup"},
+                element=RadioButtonsElement(
+                    action_id="channel_action",
+                    options=[
+                        Option(text=PlainTextObject(text=action.text), value=action.value)
+                        for action in ChannelAction
+                    ],
+                    initial_option=Option(
+                        text=PlainTextObject(text=ChannelAction.CREATE_NEW.text),
+                        value=ChannelAction.CREATE_NEW.value,
+                    ),
+                ),
             ).to_dict(),
             InputBlock(
                 block_id="stage_block",
