@@ -616,7 +616,7 @@ def open_create_modal(ack, body, client):  # noqa: ANN001
 
 
 @app.view("create_project_submit")
-def handle_create_project(ack, body, client):  # noqa: ANN001
+def handle_create_project(ack, body, client, logger):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
     values = body["view"]["state"]["values"]
