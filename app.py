@@ -2381,10 +2381,10 @@ def google_callback() -> Response:
     state = request.args.get("state")
     if not code or not state:
         return Response("Missing code or state.", status=400)
-    try:
-        project_id = int(state)
-    except ValueError:
+    oauth_payload = db_service.consume_oauth_state(state)
+    if not oauth_payload:
         return Response("Invalid state.", status=400)
+    project_id = oauth_payload["project_id"]
     try:
         token_response = google_service.get_tokens_from_code(code)
         project = db_service.get_project(project_id)
