@@ -317,6 +317,7 @@ class DbService:
         self,
         user_id: str,
         name: str,
+        description: str | None = None,
         opportunity: str | None = None,
         capability: str | None = None,
         progress: str | None = None,
@@ -325,11 +326,13 @@ class DbService:
         channel_id: str | None = None,
         add_starter_kit: bool = True,
     ) -> Project:
-        description = self._format_project_description(opportunity, capability, progress)
+        formatted_description = self._format_project_description(opportunity, capability, progress)
+        if description and not formatted_description:
+            formatted_description = description
         with SessionLocal() as db:
             project = Project(
                 name=name,
-                description=description or "",
+                description=formatted_description or "",
                 mission=mission,
                 stage=stage,
                 created_by=user_id,
