@@ -438,11 +438,13 @@ class UIManager:
             title = assumption.get("title", "Untitled")
             lane = assumption.get("lane", "Now")
             density = assumption.get("evidence_density", 0)
-            category = assumption.get("category") or "Value"
-            category_label = category if category in category_emojis else "Value"
+            category = (assumption.get("category") or "Value").strip()
+            category_label = category.title()
+            if category_label not in category_emojis:
+                category_label = "Value"
             category_display = f"{category_emojis.get(category_label, '💰')} {category_label}"
             evidence_link = (assumption.get("evidence_link") or "").strip()
-            evidence_warning = " • ⚠️ No Evidence" if not evidence_link else ""
+            evidence_warning = " • ⚠️ Missing Evidence" if not evidence_link else ""
             blocks.append(
                 {
                     "type": "section",
@@ -599,7 +601,7 @@ class UIManager:
                 "elements": [
                     UIManager._safe_button("🔍 Extract Insights (Manual)", "open_extract_insights"),
                     UIManager._safe_button("📄 Generate Learning Report (PDF)", "export_report", value="pdf"),
-                    UIManager._safe_button("💾 Export CSV", "export_report", value="csv"),
+                    UIManager._safe_button("💾 Export CSV", "export_report_footer", value="csv"),
                     UIManager._safe_button("📢 Broadcast Update", "broadcast_update"),
                 ],
             }

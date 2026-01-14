@@ -1,5 +1,6 @@
 import datetime as dt
 import logging
+import os
 from typing import Any
 from urllib.parse import urlencode
 
@@ -42,6 +43,23 @@ class GoogleService:
             "client_id": self.client_id,
             "client_secret": self.client_secret,
             "redirect_uri": self.redirect_uri,
+            "grant_type": "authorization_code",
+        }
+        response = requests.post(self._TOKEN_URL, data=payload, timeout=20)
+        response.raise_for_status()
+        return response.json()
+
+    def get_tokens_from_code(self, code: str) -> dict[str, Any]:
+        client_id = os.environ.get("GOOGLE_CLIENT_ID")
+        client_secret = os.environ.get("GOOGLE_CLIENT_SECRET")
+        redirect_uri = os.environ.get("GOOGLE_REDIRECT_URI")
+        if not client_id or not client_secret or not redirect_uri:
+            raise ValueError("Google OAuth client settings are missing.")
+        payload = {
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
             "grant_type": "authorization_code",
         }
         response = requests.post(self._TOKEN_URL, data=payload, timeout=20)
