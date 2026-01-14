@@ -397,10 +397,10 @@ class UIManager:
             {
                 "type": "actions",
                 "elements": [
-                    UIManager._safe_button("✨ Magic Import", "open_magic_import_modal", project_id),
+                    UIManager._safe_button("✨ Magic Import", "open_drive_import_modal", project_id),
                     UIManager._safe_button(
                         "➕ New Assumption",
-                        "open_create_assumption_modal",
+                        "open_create_assumption",
                         project_id,
                         "primary",
                     ),
@@ -421,7 +421,7 @@ class UIManager:
                 UIManager._empty_state(
                     "No assumptions mapped. Import from a doc or add one manually.",
                     "✨ Magic Import",
-                    "open_magic_import_modal",
+                    "open_drive_import_modal",
                     project_id,
                 )
             )
@@ -750,7 +750,19 @@ class UIManager:
                 "type": "actions",
                 "elements": [
                     UIManager._safe_button("Archive Project", "archive_project"),
-                    UIManager._safe_button("Delete Project", "delete_project_confirm", style="danger"),
+                    {
+                        **UIManager._safe_button(
+                            "Delete Project",
+                            "delete_project_confirm",
+                            style="danger",
+                        ),
+                        "confirm": {
+                            "title": {"type": "plain_text", "text": "Delete this project?"},
+                            "text": {"type": "mrkdwn", "text": "This action cannot be undone."},
+                            "confirm": {"type": "plain_text", "text": "Delete"},
+                            "deny": {"type": "plain_text", "text": "Cancel"},
+                        },
+                    },
                 ],
             }
         )
