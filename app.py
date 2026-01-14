@@ -714,55 +714,7 @@ def open_create_modal(ack, body, client):  # noqa: ANN001
     ack()
     client.views_open(
         trigger_id=body["trigger_id"],
-        view={
-            "type": "modal",
-            "callback_id": "create_project_submit",
-            "title": {"type": "plain_text", "text": "New Project"},
-            "blocks": [
-                # 1. Project Name Input
-                {
-                    "type": "input",
-                    "block_id": "name_block",
-                    "label": {"type": "plain_text", "text": "Project Name"},
-                    "element": {"type": "plain_text_input", "action_id": "name"},
-                },
-                # 2. THE MISSION DROPDOWN (This was likely missing)
-                {
-                    "type": "input",
-                    "block_id": "mission_block",
-                    "label": {"type": "plain_text", "text": "Primary Mission"},
-                    "element": {
-                        "type": "static_select",
-                        "action_id": "mission_select",
-                        "placeholder": {"type": "plain_text", "text": "Select a mission"},
-                        "options": [
-                            {"text": {"type": "plain_text", "text": "🟢 A Fairer Start (AFS)"}, "value": "AFS"},
-                            {"text": {"type": "plain_text", "text": "🍎 A Healthy Life (AHL)"}, "value": "AHL"},
-                            {"text": {"type": "plain_text", "text": "🌱 A Sustainable Future (ASF)"}, "value": "ASF"},
-                            {"text": {"type": "plain_text", "text": "🔭 Mission Discovery"}, "value": "Mission Discovery"},
-                            {"text": {"type": "plain_text", "text": "🔗 Mission Adjacent"}, "value": "Mission Adjacent"},
-                            {"text": {"type": "plain_text", "text": "⚔️ Cross-cutting"}, "value": "Cross-cutting"},
-                            {"text": {"type": "plain_text", "text": "📜 Policy"}, "value": "Policy"},
-                        ],
-                    },
-                },
-                # 3. Channel Setup
-                {
-                    "type": "section",
-                    "block_id": "channel_block",
-                    "text": {"type": "mrkdwn", "text": "*Channel Setup*"},
-                    "accessory": {
-                        "type": "radio_buttons",
-                        "action_id": "channel_action",
-                        "options": [
-                            {"text": {"type": "plain_text", "text": "Create new channel"}, "value": "create_new"},
-                            {"text": {"type": "plain_text", "text": "Use current channel"}, "value": "use_current"},
-                        ],
-                    },
-                },
-            ],
-            "submit": {"type": "plain_text", "text": "Launch"},
-        },
+        view=UIManager.render_create_project_modal(),
     )
 
 
@@ -774,6 +726,9 @@ def handle_create_project(ack, body, client, logger):  # noqa: ANN001
 
     # 1. Extract Values
     name = values["name_block"]["name"]["value"]
+    opportunity = values["opportunity_block"]["opportunity_input"]["value"]
+    capability = values["capability_block"]["capability_input"]["value"]
+    progress = values["progress_block"]["progress_input"]["value"]
 
     # Extract Mission (Safety check ensures it doesn't crash if block is missing)
     mission = None
@@ -803,7 +758,15 @@ def handle_create_project(ack, body, client, logger):  # noqa: ANN001
             )
 
     # 3. Create in DB (Pass the 'mission' variable!)
-    db_service.create_project(user_id, name, "", mission=mission, channel_id=channel_id)
+    db_service.create_project(
+        user_id,
+        name,
+        opportunity=opportunity,
+        capability=capability,
+        progress=progress,
+        mission=mission,
+        channel_id=channel_id,
+    )
 
     # 4. Refresh Home
     app_home_opened(client, {"user": user_id}, None)
@@ -949,13 +912,64 @@ def handle_help_command(ack, body, client):  # noqa: ANN001
     """
     ack()
     user_id = body["user_id"]
-    blocks = get_help_manual_blocks()
+    blocks = UIManager.render_help_guide()
     client.chat_postEphemeral(
         channel=body["channel_id"],
         user=user_id,
         text="Evidently Help Guide",
         blocks=blocks,
     )
+
+
+@app.command("/evidently-feedback")
+def handle_feedback_command(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "callback_id": "feedback_submit",
+            "title": {"type": "plain_text", "text": "Send Feedback"},
+            "submit": {"type": "plain_text", "text": "Send"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "feedback_text",
+                    "label": {"type": "plain_text", "text": "Your feedback"},
+                    "element": {"type": "plain_text_input", "action_id": "feedback_input", "multiline": True},
+                }
+            ],
+        },
+    )
+
+
+@app.view("feedback_submit")
+def handle_feedback_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    feedback_text = body["view"]["state"]["values"]["feedback_text"]["feedback_input"]["value"]
+    if not ADMIN_USER_ID:
+        client.chat_postMessage(
+            channel=user_id,
+            text="Thanks for the feedback! The admin channel isn't configured yet.",
+        )
+        return
+    try:
+        client.chat_postMessage(
+            channel=ADMIN_USER_ID,
+            text=f"📝 Feedback from <@{user_id}>:\n{feedback_text}",
+        )
+        client.chat_postMessage(
+            channel=user_id,
+            text="✅ Your feedback was sent. Thank you!",
+        )
+    except SlackApiError as exc:
+        logger.error("Failed to send feedback: %s", exc, exc_info=True)
+        client.chat_postMessage(
+            channel=user_id,
+            text="❌ Something went wrong sending your feedback. Please try again.",
+        )
 
 
 @app.command("/evidently-status")
@@ -1301,7 +1315,9 @@ def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
         db_service.create_project(
             user_id,
             name,
-            description=problem,
+            opportunity=problem,
+            capability="",
+            progress="",
             stage=stage,
             mission=mission,
             channel_id=channel_id,
@@ -1351,54 +1367,7 @@ def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
 def open_assumption_modal(client, trigger_id: str) -> None:
     client.views_open(
         trigger_id=trigger_id,
-        view={
-            "type": "modal",
-            "callback_id": "create_assumption_submit",
-            "title": {"type": "plain_text", "text": "New Roadmap Item"},
-            "blocks": [
-                {
-                    "type": "input",
-                    "block_id": "assumption_title",
-                    "label": {"type": "plain_text", "text": "Roadmap item"},
-                    "element": {"type": "plain_text_input", "action_id": "title_input"},
-                },
-                {
-                    "type": "input",
-                    "block_id": "assumption_lane",
-                    "label": {"type": "plain_text", "text": "Lane"},
-                    "element": {
-                        "type": "static_select",
-                        "action_id": "lane_input",
-                        "options": [
-                            {"text": {"type": "plain_text", "text": "Now"}, "value": "Now"},
-                            {"text": {"type": "plain_text", "text": "Next"}, "value": "Next"},
-                            {"text": {"type": "plain_text", "text": "Later"}, "value": "Later"},
-                        ],
-                    },
-                },
-                {
-                    "type": "input",
-                    "block_id": "assumption_status",
-                    "label": {"type": "plain_text", "text": "Validation status"},
-                    "element": {
-                        "type": "static_select",
-                        "action_id": "status_input",
-                        "options": [
-                            {"text": {"type": "plain_text", "text": "Testing"}, "value": "Testing"},
-                            {"text": {"type": "plain_text", "text": "Validated"}, "value": "Validated"},
-                            {"text": {"type": "plain_text", "text": "Rejected"}, "value": "Rejected"},
-                        ],
-                    },
-                },
-                {
-                    "type": "input",
-                    "block_id": "assumption_density",
-                    "label": {"type": "plain_text", "text": "Evidence density (docs)"},
-                    "element": {"type": "plain_text_input", "action_id": "density_input"},
-                },
-            ],
-            "submit": {"type": "plain_text", "text": "Add"},
-        },
+        view=UIManager.render_create_assumption_modal(),
     )
 
 
@@ -1533,6 +1502,11 @@ def open_drive_import_modal(ack, body, client):  # noqa: ANN001
             ],
         },
     )
+
+
+@app.action("open_magic_import_modal")
+def open_magic_import_modal(ack, body, client):  # noqa: ANN001
+    open_drive_import_modal(ack, body, client)
 
 
 @app.view("drive_import_submit")
@@ -2741,9 +2715,11 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
     try:
         values = body["view"]["state"]["values"]
         title = values["assumption_title"]["title_input"]["value"]
+        category = values["assumption_category"]["category_input"]["selected_option"]["value"]
         lane = values["assumption_lane"]["lane_input"]["selected_option"]["value"]
         status = values["assumption_status"]["status_input"]["selected_option"]["value"]
         density_text = values["assumption_density"]["density_input"]["value"]
+        evidence_link = values.get("assumption_evidence_link", {}).get("evidence_link_input", {}).get("value")
         try:
             density = max(0, int(density_text))
         except (ValueError, TypeError):
@@ -2766,6 +2742,8 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
             project_id=project["id"],
             data={
                 "title": title,
+                "category": category,
+                "evidence_link": evidence_link,
                 "lane": lane,
                 "validation_status": status,
                 "evidence_density": density,

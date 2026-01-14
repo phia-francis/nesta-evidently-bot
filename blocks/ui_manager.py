@@ -397,7 +397,7 @@ class UIManager:
             {
                 "type": "actions",
                 "elements": [
-                    UIManager._safe_button("✨ Magic Import", "open_drive_import_modal", project_id),
+                    UIManager._safe_button("✨ Magic Import", "open_magic_import_modal", project_id),
                     UIManager._safe_button(
                         "➕ New Assumption",
                         "open_create_assumption",
@@ -421,16 +421,28 @@ class UIManager:
                 UIManager._empty_state(
                     "No assumptions mapped. Import from a doc or add one manually.",
                     "✨ Magic Import",
-                    "open_drive_import_modal",
+                    "open_magic_import_modal",
                     project_id,
                 )
             )
             return blocks
 
+        category_emojis = {
+            "Value": "💰",
+            "Growth": "📈",
+            "Sustainability": "♻️",
+            "Impact": "🌍",
+            "Feasibility": "⚙️",
+        }
         for assumption in assumptions:
             title = assumption.get("title", "Untitled")
             lane = assumption.get("lane", "Now")
             density = assumption.get("evidence_density", 0)
+            category = assumption.get("category") or "Value"
+            category_label = category if category in category_emojis else "Value"
+            category_display = f"{category_emojis.get(category_label, '💰')} {category_label}"
+            evidence_link = (assumption.get("evidence_link") or "").strip()
+            evidence_warning = " • ⚠️ No Evidence" if not evidence_link else ""
             blocks.append(
                 {
                     "type": "section",
@@ -450,7 +462,10 @@ class UIManager:
                 {
                     "type": "context",
                     "elements": [
-                        {"type": "mrkdwn", "text": f"Lane: {lane} • Evidence: {density} docs"},
+                        {
+                            "type": "mrkdwn",
+                            "text": f"Lane: {lane} • Evidence: {density} docs • Category: {category_display}{evidence_warning}",
+                        },
                     ],
                 }
             )
@@ -822,6 +837,209 @@ class UIManager:
                 },
             ],
         }
+
+    @staticmethod
+    def render_create_project_modal() -> dict[str, Any]:
+        return {
+            "type": "modal",
+            "callback_id": "create_project_submit",
+            "title": {"type": "plain_text", "text": "New Project"},
+            "submit": {"type": "plain_text", "text": "Launch"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "name_block",
+                    "label": {"type": "plain_text", "text": "Project Name"},
+                    "element": {"type": "plain_text_input", "action_id": "name"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "mission_block",
+                    "label": {"type": "plain_text", "text": "Primary Mission"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "mission_select",
+                        "placeholder": {"type": "plain_text", "text": "Select a mission"},
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "🟢 A Fairer Start (AFS)"}, "value": "AFS"},
+                            {"text": {"type": "plain_text", "text": "🍎 A Healthy Life (AHL)"}, "value": "AHL"},
+                            {"text": {"type": "plain_text", "text": "🌱 A Sustainable Future (ASF)"}, "value": "ASF"},
+                            {"text": {"type": "plain_text", "text": "🔭 Mission Discovery"}, "value": "Mission Discovery"},
+                            {"text": {"type": "plain_text", "text": "🔗 Mission Adjacent"}, "value": "Mission Adjacent"},
+                            {"text": {"type": "plain_text", "text": "⚔️ Cross-cutting"}, "value": "Cross-cutting"},
+                            {"text": {"type": "plain_text", "text": "📜 Policy"}, "value": "Policy"},
+                        ],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "opportunity_block",
+                    "label": {"type": "plain_text", "text": "Opportunity"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "opportunity_input",
+                        "multiline": True,
+                        "placeholder": {"type": "plain_text", "text": "What is the problem/opportunity?"},
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "capability_block",
+                    "label": {"type": "plain_text", "text": "Capability"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "capability_input",
+                        "multiline": True,
+                        "placeholder": {"type": "plain_text", "text": "What capabilities do we need?"},
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "progress_block",
+                    "label": {"type": "plain_text", "text": "Progress"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "progress_input",
+                        "multiline": True,
+                        "placeholder": {"type": "plain_text", "text": "How will we measure progress?"},
+                    },
+                },
+                {
+                    "type": "section",
+                    "block_id": "channel_block",
+                    "text": {"type": "mrkdwn", "text": "*Channel Setup*"},
+                    "accessory": {
+                        "type": "radio_buttons",
+                        "action_id": "channel_action",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "Create new channel"}, "value": "create_new"},
+                            {"text": {"type": "plain_text", "text": "Use current channel"}, "value": "use_current"},
+                        ],
+                    },
+                },
+            ],
+        }
+
+    @staticmethod
+    def render_create_assumption_modal() -> dict[str, Any]:
+        category_options = [
+            {"text": {"type": "plain_text", "text": "Value"}, "value": "Value"},
+            {"text": {"type": "plain_text", "text": "Growth"}, "value": "Growth"},
+            {"text": {"type": "plain_text", "text": "Sustainability"}, "value": "Sustainability"},
+            {"text": {"type": "plain_text", "text": "Impact"}, "value": "Impact"},
+            {"text": {"type": "plain_text", "text": "Feasibility"}, "value": "Feasibility"},
+        ]
+        return {
+            "type": "modal",
+            "callback_id": "create_assumption_submit",
+            "title": {"type": "plain_text", "text": "New Roadmap Item"},
+            "submit": {"type": "plain_text", "text": "Add"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "assumption_title",
+                    "label": {"type": "plain_text", "text": "Roadmap item"},
+                    "element": {"type": "plain_text_input", "action_id": "title_input"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_category",
+                    "label": {"type": "plain_text", "text": "Risk Category"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "category_input",
+                        "options": category_options,
+                        "initial_option": category_options[0],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_lane",
+                    "label": {"type": "plain_text", "text": "Lane"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "lane_input",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "Now"}, "value": "Now"},
+                            {"text": {"type": "plain_text", "text": "Next"}, "value": "Next"},
+                            {"text": {"type": "plain_text", "text": "Later"}, "value": "Later"},
+                        ],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_status",
+                    "label": {"type": "plain_text", "text": "Validation status"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "status_input",
+                        "options": [
+                            {"text": {"type": "plain_text", "text": "Testing"}, "value": "Testing"},
+                            {"text": {"type": "plain_text", "text": "Validated"}, "value": "Validated"},
+                            {"text": {"type": "plain_text", "text": "Rejected"}, "value": "Rejected"},
+                        ],
+                    },
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_density",
+                    "label": {"type": "plain_text", "text": "Evidence density (docs)"},
+                    "element": {"type": "plain_text_input", "action_id": "density_input"},
+                },
+                {
+                    "type": "input",
+                    "block_id": "assumption_evidence_link",
+                    "optional": True,
+                    "label": {"type": "plain_text", "text": "Evidence Link"},
+                    "hint": {"type": "plain_text", "text": "Link to research or data backing this."},
+                    "element": {"type": "plain_text_input", "action_id": "evidence_link_input"},
+                },
+            ],
+        }
+
+    @staticmethod
+    def render_help_guide() -> list[dict[str, Any]]:
+        return [
+            {"type": "header", "text": {"type": "plain_text", "text": "📘 How to use Evidently"}},
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Start with the Structured Roadmap*\n"
+                        "Capture opportunity, capability, and progress measures when you create a project."
+                    ),
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Risk Categories*\n"
+                        "• 💰 *Value* — does this solve a meaningful problem?\n"
+                        "• 📈 *Growth* — can we reach and grow the audience?\n"
+                        "• ♻️ *Sustainability* — can we sustain the model over time?\n"
+                        "• 🌍 *Impact* — will this create the intended outcomes?\n"
+                        "• ⚙️ *Feasibility* — can we deliver with available resources?"
+                    ),
+                },
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Evidence Nudges*\n"
+                        "Add evidence links to every assumption and keep experiments updated to show weekly wins."
+                    ),
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [UIManager._safe_button("Open Dashboard", "refresh_home")],
+            },
+        ]
 
     @staticmethod
     def render_project_hub(
