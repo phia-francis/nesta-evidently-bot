@@ -60,11 +60,12 @@ from config import Config
 from config_manager import ConfigManager
 from services import knowledge_base
 from services.ai_service import AiService, EvidenceAI
-from services.db_service import DbService
+from services.db_service import DbService, engine
 from services.decision_service import DecisionRoomService
 from services.backup_service import BackupService
 from services.google_workspace_service import GoogleWorkspaceService
 from services.google_service import GoogleService
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from services.integration_service import IntegrationService
 from services.ingestion_service import IngestionService
@@ -1010,13 +1011,24 @@ def handle_db_fix(ack, body, client):  # noqa: ANN001
         user=user_id,
         text="🛠️ Attempting to patch database schema...",
     )
-
-    result_message = db_service.run_manual_patch()
+    statements = [
+        "ALTER TABLE projects ADD COLUMN dashboard_message_ts VARCHAR",
+        "ALTER TABLE projects ADD COLUMN dashboard_channel_id VARCHAR",
+        "ALTER TABLE assumptions ADD COLUMN category VARCHAR",
+        "ALTER TABLE assumptions ADD COLUMN evidence_link VARCHAR",
+        "ALTER TABLE experiments ADD COLUMN outcome VARCHAR",
+    ]
+    with engine.begin() as connection:
+        for statement in statements:
+            try:
+                connection.execute(text(statement))
+            except SQLAlchemyError:
+                logger.info("Skipping schema update for statement: %s", statement)
 
     client.chat_postEphemeral(
         channel=user_id,
         user=user_id,
-        text=result_message,
+        text="✅ Database schema patched successfully.",
     )
 
 
@@ -2363,8 +2375,8 @@ def handle_integration_modal_submit(ack, body, client, logger):  # noqa: ANN001
         logger.exception("Failed to update integration settings")
 
 
-@flask_app.route("/auth/callback/google")
-def google_auth_callback() -> Response:
+@flask_app.route("/auth/callback/google", methods=["GET"])
+def google_callback() -> Response:
     code = request.args.get("code")
     state = request.args.get("state")
     if not code or not state:
@@ -2374,14 +2386,19 @@ def google_auth_callback() -> Response:
         return Response("Invalid state.", status=400)
     project_id = oauth_payload["project_id"]
     try:
-        token_response = google_service.exchange_code(code)
-        db_service.update_google_tokens(
-            project_id,
-            token_response.get("access_token", ""),
-            token_response.get("refresh_token"),
-            token_response.get("expires_in"),
-        )
-        return Response("<h2>Connection Successful</h2>", status=200, mimetype="text/html")
+        token_response = google_service.get_tokens_from_code(code)
+        project = db_service.get_project(project_id)
+        if not project:
+            return Response("Project not found.", status=404)
+        integrations = project.get("integrations") or {}
+        integrations["drive"] = {
+            "connected": True,
+            "access_token": token_response.get("access_token"),
+            "refresh_token": token_response.get("refresh_token"),
+            "expires_in": token_response.get("expires_in"),
+        }
+        db_service.update_project_integrations(project_id, integrations)
+        return Response("<h1>Success! Drive Connected.</h1>", status=200, mimetype="text/html")
     except (requests.exceptions.RequestException, SQLAlchemyError, ValueError):
         logger.exception("Google OAuth callback failed")
         return Response("Connection failed.", status=500)
@@ -2554,6 +2571,16 @@ def handle_bulk_sync_asana(ack, body, client, logger):  # noqa: ANN001
 @app.action("export_report")
 def handle_export_report(ack, body, client):  # noqa: ANN001
     ack()
+    _run_export_report(body, client)
+
+
+@app.action("export_report_footer")
+def handle_export_report_footer(ack, body, client):  # noqa: ANN001
+    ack()
+    _run_export_report(body, client)
+
+
+def _run_export_report(body, client) -> None:  # noqa: ANN001
     action_value = body["actions"][0].get("value", "pdf")
     user_id = body["user"]["id"]
     project = db_service.get_active_project(user_id)
