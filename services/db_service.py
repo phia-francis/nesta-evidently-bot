@@ -795,34 +795,43 @@ class DbService:
     def get_stale_projects(self, days: int = 14) -> list[Dict[str, Any]]:
         cutoff = dt.datetime.utcnow() - dt.timedelta(days=days)
         with SessionLocal() as db:
+            latest_assumption = (
+                db.query(
+                    Assumption.project_id.label("project_id"),
+                    func.max(Assumption.updated_at).label("latest_assumption"),
+                )
+                .group_by(Assumption.project_id)
+                .subquery()
+            )
+            latest_experiment = (
+                db.query(
+                    Experiment.project_id.label("project_id"),
+                    func.max(func.coalesce(Experiment.end_date, Experiment.start_date)).label("latest_experiment"),
+                )
+                .group_by(Experiment.project_id)
+                .subquery()
+            )
+            last_activity = func.max(
+                func.coalesce(latest_assumption.c.latest_assumption, Project.created_at),
+                func.coalesce(latest_experiment.c.latest_experiment, Project.created_at),
+                Project.created_at,
+            )
             projects = (
                 db.query(Project)
-                .options(
-                    joinedload(Project.assumptions),
-                    joinedload(Project.experiments),
-                )
+                .outerjoin(latest_assumption, latest_assumption.c.project_id == Project.id)
+                .outerjoin(latest_experiment, latest_experiment.c.project_id == Project.id)
                 .filter(Project.status == "active")
+                .filter(last_activity < cutoff)
                 .all()
             )
-            stale_projects: list[Dict[str, Any]] = []
-            for project in projects:
-                latest_activity = project.created_at or dt.datetime.utcnow()
-                for assumption in project.assumptions:
-                    if assumption.updated_at and assumption.updated_at > latest_activity:
-                        latest_activity = assumption.updated_at
-                for experiment in project.experiments:
-                    for timestamp in (experiment.end_date, experiment.start_date):
-                        if timestamp and timestamp > latest_activity:
-                            latest_activity = timestamp
-                if latest_activity < cutoff:
-                    stale_projects.append(
-                        {
-                            "id": project.id,
-                            "name": project.name,
-                            "created_by": project.created_by,
-                        }
-                    )
-            return stale_projects
+            return [
+                {
+                    "id": project.id,
+                    "name": project.name,
+                    "created_by": project.created_by,
+                }
+                for project in projects
+            ]
 
     def create_experiment(
         self,

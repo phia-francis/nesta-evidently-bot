@@ -964,7 +964,7 @@ def handle_feedback_submit(ack, body, client, logger):  # noqa: ANN001
             channel=user_id,
             text="✅ Your feedback was sent. Thank you!",
         )
-    except Exception as exc:  # noqa: BLE001
+    except SlackApiError as exc:
         logger.error("Failed to send feedback: %s", exc, exc_info=True)
         client.chat_postMessage(
             channel=user_id,

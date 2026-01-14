@@ -111,6 +111,16 @@ def start_scheduler(
     db_service: "DbService",
     ui_manager: Type["UIManager"],
 ) -> BackgroundScheduler:
+    def _env_int(name: str, default: int) -> int:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            logging.warning("Invalid %s value '%s'; using default %s.", name, value, default)
+            return default
+
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         update_all_dashboards,
@@ -122,16 +132,16 @@ def start_scheduler(
     scheduler.add_job(
         broadcast_weekly_wins,
         "cron",
-        day_of_week="mon",
-        hour=9,
-        minute=30,
+        day_of_week=os.environ.get("WEEKLY_WINS_DAY_OF_WEEK", "mon"),
+        hour=_env_int("WEEKLY_WINS_HOUR", 9),
+        minute=_env_int("WEEKLY_WINS_MINUTE", 30),
         args=[client, db_service],
     )
     scheduler.add_job(
         nudge_stale_projects,
         "cron",
-        hour=10,
-        minute=0,
+        hour=_env_int("STALE_PROJECT_NUDGE_HOUR", 10),
+        minute=_env_int("STALE_PROJECT_NUDGE_MINUTE", 0),
         args=[client, db_service],
     )
     scheduler.start()
