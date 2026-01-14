@@ -1,11 +1,21 @@
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Type
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from slack_sdk.errors import SlackApiError
 
+if TYPE_CHECKING:
+    from slack_sdk.web.client import WebClient
 
-def update_all_dashboards(client, db_service, ui_manager) -> None:  # noqa: ANN001
+    from blocks.ui_manager import UIManager
+    from services.db_service import DbService
+
+
+def update_all_dashboards(
+    client: "WebClient",
+    db_service: "DbService",
+    ui_manager: Type["UIManager"],
+) -> None:
     projects = db_service.get_projects_with_dashboard_message_ts()
     for project in projects:
         channel_id = project.get("channel_id")
@@ -34,11 +44,19 @@ def update_all_dashboards(client, db_service, ui_manager) -> None:  # noqa: ANN0
             )
         except SlackApiError as exc:
             logging.warning("Failed to update dashboard for project %s: %s", project.get("id"), exc)
-        except Exception:
-            logging.exception("Unexpected error updating dashboard for project %s", project.get("id"))
+        except (KeyError, TypeError, ValueError) as exc:
+            logging.warning(
+                "Failed to build dashboard update for project %s: %s",
+                project.get("id"),
+                exc,
+            )
 
 
-def start_scheduler(client, db_service, ui_manager) -> BackgroundScheduler:  # noqa: ANN001
+def start_scheduler(
+    client: "WebClient",
+    db_service: "DbService",
+    ui_manager: Type["UIManager"],
+) -> BackgroundScheduler:
     scheduler = BackgroundScheduler()
     scheduler.add_job(
         update_all_dashboards,

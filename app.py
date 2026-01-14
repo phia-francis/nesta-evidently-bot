@@ -3808,7 +3808,7 @@ def handle_move_assumption_submit(ack, body, client, logger):  # noqa: ANN001
         db_service.update_assumption_lane(int(assumption_id), lane)
         client.chat_postEphemeral(channel=user_id, user=user_id, text=f"Moved to {lane}.")
         publish_home_tab_async(client, user_id, "roadmap:roadmap")
-    except Exception:  # noqa: BLE001
+    except (KeyError, ValueError, SQLAlchemyError):
         logger.error("Failed to move assumption", exc_info=True)
 
 
