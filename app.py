@@ -71,6 +71,7 @@ from services.ingestion_service import IngestionService
 from services.messenger_service import MessengerService
 from services.playbook_service import PlaybookService
 from services.sync_service import TwoWaySyncService
+from services.scheduler_service import start_scheduler
 from services.toolkit_service import ToolkitService
 
 
@@ -2183,6 +2184,11 @@ def open_create_channel(ack, body, client):  # noqa: ANN001
     client.views_open(trigger_id=body["trigger_id"], view=create_channel_modal(project["name"]))
 
 
+@app.action("channel_action")
+def handle_channel_action(ack):  # noqa: ANN001
+    ack()
+
+
 @app.view("create_channel_submit")
 def create_channel_submit(ack, body, client, logger):  # noqa: ANN001
     ack()
@@ -2313,7 +2319,16 @@ def open_integration_modal_drive(ack, body, client):  # noqa: ANN001
 @app.action("connect_google_drive")
 def connect_google_drive(ack, body, client):  # noqa: ANN001
     ack()
-    user_id = body["user"]["id"]
+    _send_google_auth_link(body["user"]["id"], client)
+
+
+@app.action("start_google_auth")
+def start_google_auth(ack, body, client):  # noqa: ANN001
+    ack()
+    _send_google_auth_link(body["user"]["id"], client)
+
+
+def _send_google_auth_link(user_id: str, client) -> None:  # noqa: ANN001
     project = db_service.get_active_project(user_id)
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
@@ -2932,11 +2947,21 @@ def handle_ai_experiments(ack, body, client):  # noqa: ANN001
     run_in_background(update_view)
 
 
+@app.action("open_create_experiment_modal")
+def open_create_experiment_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    _open_create_experiment_modal(client, body["trigger_id"])
+
+
 @app.action("create_experiment_manual")
 def open_manual_experiment_modal(ack, body, client):  # noqa: ANN001
     ack()
+    _open_create_experiment_modal(client, body["trigger_id"])
+
+
+def _open_create_experiment_modal(client, trigger_id: str) -> None:  # noqa: ANN001
     client.views_open(
-        trigger_id=body["trigger_id"],
+        trigger_id=trigger_id,
         view={
             "type": "modal",
             "callback_id": "create_experiment_submit",
@@ -3718,6 +3743,35 @@ def handle_assumption_overflow(ack, body, client, logger):  # noqa: ANN001
                 client.chat_postEphemeral(channel=user_id, user=user_id, text="Assumption not found.")
                 return
             open_edit_assumption_text_modal(client, body["trigger_id"], assumption)
+        elif action == "move":
+            options = [
+                {"text": {"type": "plain_text", "text": "Now"}, "value": "Now"},
+                {"text": {"type": "plain_text", "text": "Next"}, "value": "Next"},
+                {"text": {"type": "plain_text", "text": "Later"}, "value": "Later"},
+            ]
+            client.views_open(
+                trigger_id=body["trigger_id"],
+                view={
+                    "type": "modal",
+                    "callback_id": "move_assumption_submit",
+                    "private_metadata": assumption_id,
+                    "title": {"type": "plain_text", "text": "Move Assumption"},
+                    "submit": {"type": "plain_text", "text": "Move"},
+                    "close": {"type": "plain_text", "text": "Cancel"},
+                    "blocks": [
+                        {
+                            "type": "input",
+                            "block_id": "lane_block",
+                            "label": {"type": "plain_text", "text": "Select lane"},
+                            "element": {
+                                "type": "static_select",
+                                "action_id": "lane",
+                                "options": options,
+                            },
+                        }
+                    ],
+                },
+            )
         elif action == "exp":
             assumption = db_service.get_assumption(int(assumption_id))
             if not assumption:
@@ -3739,6 +3793,49 @@ def handle_assumption_overflow(ack, body, client, logger):  # noqa: ANN001
             client.chat_postEphemeral(channel=user_id, user=user_id, text="Action received.")
     except Exception as exc:  # noqa: BLE001
         logger.error("Overflow action failed", exc_info=True)
+
+
+@app.view("move_assumption_submit")
+def handle_move_assumption_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    assumption_id = body["view"].get("private_metadata")
+    if not assumption_id:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Assumption not found.")
+        return
+    try:
+        lane = body["view"]["state"]["values"]["lane_block"]["lane"]["selected_option"]["value"]
+        db_service.update_assumption_lane(int(assumption_id), lane)
+        client.chat_postEphemeral(channel=user_id, user=user_id, text=f"Moved to {lane}.")
+        publish_home_tab_async(client, user_id, "roadmap:roadmap")
+    except Exception:  # noqa: BLE001
+        logger.error("Failed to move assumption", exc_info=True)
+
+
+@app.action("design_assumption_experiment")
+def handle_design_assumption_experiment(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    try:
+        assumption_id = body["actions"][0]["value"]
+        assumption = db_service.get_assumption(int(assumption_id))
+        user_id = body["user"]["id"]
+        if not assumption:
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Assumption not found.")
+            return
+        trigger_id = body.get("trigger_id")
+        response = client.views_open(
+            trigger_id=trigger_id,
+            view=experiment_modal(assumption["title"], "Generating suggestions..."),
+        )
+        view_id = response["view"]["id"]
+
+        def update_modal() -> None:
+            suggestions = ai_service.generate_experiment_suggestions(assumption["title"])
+            client.views_update(view_id=view_id, view=experiment_modal(assumption["title"], suggestions))
+
+        run_in_background(update_modal)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Design experiment action failed", exc_info=True)
 
 
 # --- 7. GOOGLE WORKSPACE EXPORTS ---
@@ -3982,6 +4079,8 @@ stale_assumption_scheduler.add_job(
     args=[app.client],
 )
 stale_assumption_scheduler.start()
+
+daily_dashboard_scheduler = start_scheduler(app.client, db_service, UIManager)
 
 
 # --- 8. START ---

@@ -49,6 +49,7 @@ class Project(Base):
     google_access_token = Column(Text, nullable=True)
     google_refresh_token = Column(Text, nullable=True)
     token_expiry = Column(DateTime, nullable=True)
+    dashboard_message_ts = Column(String(50), nullable=True)
 
     integrations = Column(
         JSON,
@@ -231,6 +232,7 @@ class DbService:
                 "google_access_token",
                 "google_refresh_token",
                 "token_expiry",
+                "dashboard_message_ts",
             },
             "assumptions": {
                 "validation_status",
@@ -274,6 +276,7 @@ class DbService:
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS google_access_token TEXT;"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS google_refresh_token TEXT;"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS token_expiry TIMESTAMP;"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS dashboard_message_ts VARCHAR(50);"))
 
                     # --- 2. Fix ASSUMPTIONS Table (The one crashing now) ---
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(50) DEFAULT 'Testing';"))
@@ -357,6 +360,16 @@ class DbService:
         with SessionLocal() as db:
             project = db.query(Project).filter(Project.channel_id == channel_id).first()
             return self._serialize_project(project) if project else None
+
+    def get_projects_with_dashboard_message_ts(self) -> list[dict[str, Any]]:
+        with SessionLocal() as db:
+            projects = (
+                db.query(Project)
+                .filter(Project.dashboard_message_ts.isnot(None))
+                .filter(Project.dashboard_message_ts != "")
+                .all()
+            )
+            return [self._serialize_project(project) for project in projects]
 
     def get_project(self, project_id: int) -> Optional[Dict[str, Any]]:
         with SessionLocal() as db:
@@ -635,6 +648,14 @@ class DbService:
                 integrations["asana"] = {"connected": bool(external_id), "project_id": external_id}
             if type_ == "miro":
                 integrations["miro"] = {"connected": bool(external_id), "board_url": external_id}
+            project.integrations = integrations
+            db.commit()
+
+    def update_project_integrations(self, project_id: int, integrations: dict[str, Any]) -> None:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return
             project.integrations = integrations
             db.commit()
 
@@ -1009,6 +1030,8 @@ class DbService:
             "status": project.status,
             "stage": project.stage,
             "channel_id": project.channel_id,
+            "created_by": project.created_by,
+            "dashboard_message_ts": project.dashboard_message_ts,
             "integrations": project.integrations,
             "assumptions": [self._serialize_assumption(a) for a in project.assumptions],
             "experiments": [self._serialize_experiment(exp) for exp in project.experiments],
