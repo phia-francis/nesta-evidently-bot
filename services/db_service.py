@@ -5,7 +5,7 @@ import secrets
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, func, inspect, text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, func, inspect, or_, text
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -128,6 +128,7 @@ class Experiment(Base):
     method = Column(String(100))
     stage = Column(String(50))
     status = Column(String(50), default="planning")
+    outcome = Column(String(50), default="Pending")
 
     primary_kpi = Column(String(255))
     target_value = Column(String(100))
@@ -145,6 +146,8 @@ class Assumption(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
     title = Column(String(255))
+    category = Column(String(50), default="Value")
+    evidence_link = Column(Text)
     lane = Column(String(50), default="Now")
     validation_status = Column(String(50), default="Testing")
     evidence_density = Column(Integer, default=0)
@@ -241,8 +244,11 @@ class DbService:
                 "source_id",
                 "confidence_score",
                 "updated_at",
+                "category",
+                "evidence_link",
             },
             "canvas_items": {"section", "text", "ai_generated"},
+            "experiments": {"outcome"},
         }
         missing = []
         for table, required_cols in expected_tables.items():
@@ -286,6 +292,8 @@ class DbService:
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_snippet TEXT;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 0;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'Value';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_link TEXT;"))
 
                     # --- 3. Fix EXPERIMENTS Table (Prevent future crashes) ---
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS hypothesis TEXT;"))
@@ -296,6 +304,7 @@ class DbService:
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS current_value VARCHAR(100);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS dataset_link VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'planning';"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS outcome VARCHAR(50) DEFAULT 'Pending';"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS start_date TIMESTAMP;"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS end_date TIMESTAMP;"))
 
@@ -308,12 +317,15 @@ class DbService:
         self,
         user_id: str,
         name: str,
-        description: str | None = None,
+        opportunity: str | None = None,
+        capability: str | None = None,
+        progress: str | None = None,
         mission: str | None = None,
         stage: str = "Define",
         channel_id: str | None = None,
         add_starter_kit: bool = True,
     ) -> Project:
+        description = self._format_project_description(opportunity, capability, progress)
         with SessionLocal() as db:
             project = Project(
                 name=name,
@@ -753,6 +765,65 @@ class DbService:
             experiments = db.query(Experiment).filter_by(project_id=project_id).all()
             return [self._serialize_experiment(exp) for exp in experiments]
 
+    def get_recent_experiment_outcomes(self, days: int = 7) -> list[Dict[str, Any]]:
+        cutoff = dt.datetime.utcnow() - dt.timedelta(days=days)
+        with SessionLocal() as db:
+            experiments = (
+                db.query(Experiment)
+                .options(joinedload(Experiment.project))
+                .filter(Experiment.outcome.in_(["Validated", "Invalidated"]))
+                .filter(
+                    or_(
+                        Experiment.end_date.isnot(None) & (Experiment.end_date >= cutoff),
+                        Experiment.start_date.isnot(None) & (Experiment.start_date >= cutoff),
+                    )
+                )
+                .all()
+            )
+            results: list[Dict[str, Any]] = []
+            for experiment in experiments:
+                project = experiment.project
+                results.append(
+                    {
+                        "project_name": project.name if project else "Project",
+                        "hypothesis": experiment.hypothesis or experiment.title or "a hypothesis",
+                        "outcome": experiment.outcome,
+                    }
+                )
+            return results
+
+    def get_stale_projects(self, days: int = 14) -> list[Dict[str, Any]]:
+        cutoff = dt.datetime.utcnow() - dt.timedelta(days=days)
+        with SessionLocal() as db:
+            projects = (
+                db.query(Project)
+                .options(
+                    joinedload(Project.assumptions),
+                    joinedload(Project.experiments),
+                )
+                .filter(Project.status == "active")
+                .all()
+            )
+            stale_projects: list[Dict[str, Any]] = []
+            for project in projects:
+                latest_activity = project.created_at or dt.datetime.utcnow()
+                for assumption in project.assumptions:
+                    if assumption.updated_at and assumption.updated_at > latest_activity:
+                        latest_activity = assumption.updated_at
+                for experiment in project.experiments:
+                    for timestamp in (experiment.end_date, experiment.start_date):
+                        if timestamp and timestamp > latest_activity:
+                            latest_activity = timestamp
+                if latest_activity < cutoff:
+                    stale_projects.append(
+                        {
+                            "id": project.id,
+                            "name": project.name,
+                            "created_by": project.created_by,
+                        }
+                    )
+            return stale_projects
+
     def create_experiment(
         self,
         project_id: int,
@@ -770,6 +841,7 @@ class DbService:
             data["hypothesis"] = hypothesis
         data.setdefault("stage", "Develop")
         data.setdefault("status", "Planning")
+        data.setdefault("outcome", "Pending")
         with SessionLocal() as db:
             experiment = Experiment(
                 project_id=project_id,
@@ -778,6 +850,7 @@ class DbService:
                 method=data.get("method"),
                 stage=data.get("stage"),
                 status=data.get("status", "Planning"),
+                outcome=data.get("outcome", "Pending"),
                 primary_kpi=data.get("primary_kpi"),
                 target_value=data.get("target_value"),
                 current_value=data.get("current_value"),
@@ -814,6 +887,10 @@ class DbService:
                 experiment.stage = data["stage"]
             if "status" in data:
                 experiment.status = data["status"]
+            if "outcome" in data:
+                experiment.outcome = data["outcome"]
+                if experiment.end_date is None and data["outcome"] in {"Validated", "Invalidated"}:
+                    experiment.end_date = dt.datetime.utcnow()
             if "primary_kpi" in data:
                 experiment.primary_kpi = data["primary_kpi"]
             if "target_value" in data:
@@ -829,6 +906,8 @@ class DbService:
             assumption = Assumption(
                 project_id=project_id,
                 title=data.get("title"),
+                category=data.get("category", "Value"),
+                evidence_link=data.get("evidence_link"),
                 lane=data.get("lane", "Now"),
                 validation_status=data.get("validation_status", "Testing"),
                 evidence_density=data.get("evidence_density", 0),
@@ -903,6 +982,10 @@ class DbService:
                 assumption.validation_status = data["validation_status"]
             if "evidence_density" in data:
                 assumption.evidence_density = data["evidence_density"]
+            if "category" in data:
+                assumption.category = data["category"]
+            if "evidence_link" in data:
+                assumption.evidence_link = data["evidence_link"]
             db.commit()
 
     def update_assumption_title(self, assumption_id: int, new_title: str) -> None:
@@ -1073,6 +1156,7 @@ class DbService:
             "method": experiment.method,
             "stage": experiment.stage,
             "status": experiment.status,
+            "outcome": experiment.outcome,
             "primary_kpi": experiment.primary_kpi,
             "target_value": experiment.target_value,
             "current_value": experiment.current_value,
@@ -1083,6 +1167,8 @@ class DbService:
         return {
             "id": assumption.id,
             "title": assumption.title,
+            "category": assumption.category,
+            "evidence_link": assumption.evidence_link,
             "lane": assumption.lane,
             "validation_status": assumption.validation_status,
             "evidence_density": assumption.evidence_density,
@@ -1092,3 +1178,18 @@ class DbService:
             "confidence_score": assumption.confidence_score,
             "updated_at": assumption.updated_at.isoformat() if assumption.updated_at else None,
         }
+
+    @staticmethod
+    def _format_project_description(
+        opportunity: str | None,
+        capability: str | None,
+        progress: str | None,
+    ) -> str:
+        sections = []
+        if opportunity:
+            sections.append(f"Opportunity:\n{opportunity}")
+        if capability:
+            sections.append(f"Capability:\n{capability}")
+        if progress:
+            sections.append(f"Progress:\n{progress}")
+        return "\n\n".join(sections)
