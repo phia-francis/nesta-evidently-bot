@@ -107,7 +107,10 @@ def check_stale_assumptions(
     client: "WebClient",
     db_service: "DbService",
 ) -> None:
-    from blocks.interactions import get_nudge_block
+def check_stale_assumptions(
+    client: "WebClient",
+    db_service: "DbService",
+) -> None:
 
     stale_assumptions = db_service.get_stale_assumptions()
     if not stale_assumptions:
