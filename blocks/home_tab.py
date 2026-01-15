@@ -85,7 +85,8 @@ if status == "Testing" and last_tested:
                 },
                 {
                     "text": {"type": "plain_text", "text": "Design Test"},
-                    "value": f"{assumption['id']}:exp",
+                    "value": f"{assumption['id']}:design_assumption_experiment",
+                }
                 },
             ],
         },
