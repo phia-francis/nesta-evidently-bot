@@ -19,6 +19,8 @@ class Config:
     # Standard Database URL (default to local SQLite for dev)
     DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./evidently.db")
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+    GOOGLE_TOKEN_ENCRYPTION_KEY = os.environ.get("GOOGLE_TOKEN_ENCRYPTION_KEY")
+    OAUTH_STATE_TTL_SECONDS = int(os.environ.get("OAUTH_STATE_TTL_SECONDS", 600))
     PORT = int(os.environ.get("PORT", 10000))
     OAUTH_PORT = int(os.environ.get("OAUTH_PORT", 10001))
     HOST = os.environ.get("HOST", "0.0.0.0")
