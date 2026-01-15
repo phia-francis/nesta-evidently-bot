@@ -24,7 +24,7 @@ def create_web_app(
         state = request.query.get("state")
         if not code or not state:
             return web.Response(text="Missing code or state.", status=400)
-        oauth_payload = db_service.consume_oauth_state(state)
+        oauth_payload = await asyncio.to_thread(db_service.consume_oauth_state, state)
         if not oauth_payload:
             return web.Response(text="Invalid state.", status=400)
         project_id = oauth_payload["project_id"]
