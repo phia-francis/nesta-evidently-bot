@@ -4,11 +4,20 @@ import re
 
 import docx
 import pdfplumber
+from pypdf.errors import PdfReadError
 
 from services.drive_service import DriveService
 from services.db_service import DbService
 
 logger = logging.getLogger(__name__)
+
+MAX_FILE_BYTES = 50 * 1024 * 1024
+
+
+class IngestionError(Exception):
+    def __init__(self, user_message: str) -> None:
+        super().__init__(user_message)
+        self.user_message = user_message
 
 
 class IngestionService:
@@ -26,6 +35,9 @@ class IngestionService:
         Returns:
             Extracted text truncated to 50k characters, or None on failure.
         """
+        if len(file_content) > MAX_FILE_BYTES:
+            raise IngestionError("That file is too large to process. Please upload files under 50MB.")
+
         text = ""
         try:
             file_stream = io.BytesIO(file_content)
@@ -34,7 +46,7 @@ class IngestionService:
                 with pdfplumber.open(file_stream) as pdf:
                     if pdf.is_encrypted:
                         logger.warning("Encrypted PDF detected")
-                        return None
+                        raise IngestionError("That PDF is encrypted and can't be processed.")
                     for page in pdf.pages:
                         text += (page.extract_text() or "") + "\n"
 
@@ -45,9 +57,12 @@ class IngestionService:
             elif "text" in file_type:
                 text = file_content.decode("utf-8", errors="replace")
 
+        except PdfReadError:
+            logger.warning("Corrupted PDF detected", exc_info=True)
+            raise IngestionError("That PDF appears to be corrupted. Please upload a different file.")
         except Exception:  # noqa: BLE001
             logger.exception("Extraction Error")
-            return None
+            raise IngestionError("Unable to extract text from that file. Please try another file.")
 
         return self.sanitize_text(text)[:50000]
 
@@ -85,9 +100,12 @@ class IngestionService:
             file_bytes = self.drive_service.download_file(file_id)
             if not file_bytes:
                 continue
-            text = self.extract_text(file_bytes, mime_type)
-            if text:
-                content_parts.append(text)
+            try:
+                text = self.extract_text(file_bytes, mime_type)
+                if text:
+                    content_parts.append(text)
+            except IngestionError as exc:
+                logger.warning("Drive file %s skipped: %s", file_id, exc.user_message)
 
         return "\n".join(content_parts).strip()
 
@@ -104,13 +122,12 @@ class IngestionService:
         Returns:
             Payload with extracted text, chunks, and optional error.
         """
-        text = self.extract_text(file_content, file_type)
+        try:
+            text = self.extract_text(file_content, file_type)
+        except IngestionError as exc:
+            return {"error": exc.user_message, "text": "", "chunks": []}
         if not text:
-            return {
-                "error": "Unable to extract text from that file. It may be encrypted or corrupted.",
-                "text": "",
-                "chunks": [],
-            }
+            return {"error": "Unable to extract text from that file.", "text": "", "chunks": []}
         chunks = self.chunk_text(text)
         return {"text": text, "chunks": chunks}
 

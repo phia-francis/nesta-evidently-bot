@@ -25,8 +25,39 @@ class EvidenceAI:
         self.model = genai.GenerativeModel(_GEMINI_MODEL_NAME)
 
     @staticmethod
-    def _clean_json_text(text: str) -> str:
-        return text.replace("```json", "").replace("```", "").strip()
+    def _strip_code_fences(text: str) -> str:
+        return re.sub(r"```(?:json)?", "", text).replace("```", "").strip()
+
+    @staticmethod
+    def _extract_json_fragment(text: str) -> str:
+        start_candidates = [idx for idx in (text.find("{"), text.find("[")) if idx != -1]
+        if not start_candidates:
+            return text
+        start = min(start_candidates)
+        end = max(text.rfind("}"), text.rfind("]"))
+        if end <= start:
+            return text[start:]
+        return text[start : end + 1]
+
+    def _parse_json_response(self, response_text: str) -> dict | list:
+        cleaned = self._strip_code_fences(response_text)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            fragment = self._extract_json_fragment(cleaned)
+            return json.loads(fragment)
+
+    def _parse_json_with_retry(self, response_text: str, retry_prompt: str | None = None) -> dict | list:
+        try:
+            return self._parse_json_response(response_text)
+        except json.JSONDecodeError:
+            if not retry_prompt:
+                raise
+            retry_response = self.model.generate_content(
+                retry_prompt,
+                generation_config={"temperature": _TEMPERATURE},
+            )
+            return self._parse_json_response(retry_response.text)
 
     @staticmethod
     def redact_pii(text: str) -> str:
@@ -76,8 +107,35 @@ class EvidenceAI:
         response = await loop.run_in_executor(None, lambda: self.model.generate_content(prompt))
 
         try:
-            clean_json = self._clean_json_text(response.text)
-            return json.loads(clean_json)
+            parsed = self._parse_json_response(response.text)
+            if isinstance(parsed, dict):
+                for assumption in parsed.get("assumptions", []):
+                    assumption["text"] = self.redact_pii(assumption.get("text", ""))
+                    if "evidence_snippet" in assumption:
+                        assumption["evidence_snippet"] = self.redact_pii(assumption.get("evidence_snippet", ""))
+                    if "source_snippet" in assumption:
+                        assumption["source_snippet"] = self.redact_pii(assumption.get("source_snippet", ""))
+            return parsed
+        except json.JSONDecodeError:
+            retry_prompt = f"{prompt}\nReturn only valid JSON. No markdown or commentary."
+            retry_response = await loop.run_in_executor(
+                None,
+                lambda: self.model.generate_content(retry_prompt),
+            )
+            try:
+                parsed = self._parse_json_response(retry_response.text)
+                if isinstance(parsed, dict):
+                    for assumption in parsed.get("assumptions", []):
+                        assumption["text"] = self.redact_pii(assumption.get("text", ""))
+                        if "evidence_snippet" in assumption:
+                            assumption["evidence_snippet"] = self.redact_pii(
+                                assumption.get("evidence_snippet", "")
+                            )
+                        if "source_snippet" in assumption:
+                            assumption["source_snippet"] = self.redact_pii(assumption.get("source_snippet", ""))
+                return parsed
+            except json.JSONDecodeError:
+                return {"summary": response.text, "decisions": [], "assumptions": []}
         except Exception:  # noqa: BLE001
             return {"summary": response.text, "decisions": [], "assumptions": []}
 
@@ -88,7 +146,7 @@ class EvidenceAI:
             formatted = [f"- {att.get('name')} ({att.get('mimetype', 'unknown type')})" for att in attachments]
             attachment_context = "\nAttachments available:\n" + "\n".join(formatted)
 
-        playbook_context = await asyncio.to_thread(knowledge_base.get_playbook_context)
+        playbook_context = knowledge_base.get_playbook_context()
         prompt = f"""
 You are Evidently, Nesta's Test & Learn assistant. Analyse this thread.
 Only use the text inside <user_input> tags as source material.
@@ -131,10 +189,18 @@ Playbook Reference:
 
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
-            response_text = self._clean_json_text(response.text)
-            parsed = json.loads(response_text)
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn only valid JSON. No markdown or commentary.",
+            )
+            if not isinstance(parsed, dict):
+                return {"error": "Could not analyse thread due to invalid JSON payload."}
             for assumption in parsed.get("assumptions", []):
                 assumption["text"] = self.redact_pii(assumption.get("text", ""))
+                if "evidence_snippet" in assumption:
+                    assumption["evidence_snippet"] = self.redact_pii(assumption.get("evidence_snippet", ""))
+                if "source_snippet" in assumption:
+                    assumption["source_snippet"] = self.redact_pii(assumption.get("source_snippet", ""))
             return parsed
         except json.JSONDecodeError as exc:
             logger.error("AI Analysis - Failed to parse JSON", exc_info=True)
@@ -156,8 +222,10 @@ Playbook Reference:
         )
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
-            response_text = self._clean_json_text(response.text)
-            parsed = json.loads(response_text)
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn JSON only as a list of strings.",
+            )
             if isinstance(parsed, list):
                 return [str(item).strip() for item in parsed if str(item).strip()]
             return []
@@ -199,8 +267,13 @@ Documents:
 """
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
-            response_text = self._clean_json_text(response.text)
-            return json.loads(response_text)
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn only valid JSON. No markdown or commentary.",
+            )
+            if isinstance(parsed, dict):
+                return parsed
+            return {"error": "Could not generate OCP draft due to invalid JSON."}
         except json.JSONDecodeError as exc:
             logger.error("Failed to parse OCP draft JSON", exc_info=True)
             return {"error": f"Could not generate OCP draft: {exc}"}
@@ -222,8 +295,10 @@ Documents:
         try:
             clean_text = self.redact_pii(text)
             response = self.model.generate_content(f"{system_prompt}\n\n{clean_text}")
-            content = self._clean_json_text(response.text)
-            parsed = json.loads(content or "[]")
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{system_prompt}\n\n{clean_text}\nReturn JSON only.",
+            )
             if isinstance(parsed, list):
                 return [str(item).strip() for item in parsed if str(item).strip()]
             return []
@@ -284,8 +359,10 @@ Assumption count: {len(project.get('assumptions', []))}
 """
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
-            response_text = response.text.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(response_text)
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn JSON only as an array of strings.",
+            )
             if isinstance(parsed, list):
                 return [str(item) for item in parsed if item]
             return []
@@ -331,8 +408,13 @@ Return JSON only with keys: "competitors" (list of strings), "risks" (list of st
         response_text = ""
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
-            response_text = response.text.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(response_text)
+            response_text = response.text
+            parsed = self._parse_json_with_retry(
+                response_text,
+                retry_prompt=f"{prompt}\nReturn JSON only with keys: competitors, risks.",
+            )
+            if not isinstance(parsed, dict):
+                raise json.JSONDecodeError("Invalid JSON payload", response_text, 0)
             competitors = [str(item).strip() for item in parsed.get("competitors", []) if item]
             risks = [str(item).strip() for item in parsed.get("risks", []) if item]
             return {"competitors": competitors, "risks": risks}
@@ -399,8 +481,13 @@ Return JSON only in this format:
         response_text = ""
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
-            response_text = response.text.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(response_text)
+            response_text = response.text
+            parsed = self._parse_json_with_retry(
+                response_text,
+                retry_prompt=f"{prompt}\nReturn JSON only. No markdown.",
+            )
+            if not isinstance(parsed, dict):
+                raise json.JSONDecodeError("Invalid JSON payload", response_text, 0)
             canvas_data = parsed.get("canvas_data", {}) or {}
             return {
                 "canvas_data": {
@@ -435,8 +522,10 @@ Conversation:
 """
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
-            response_text = response.text.replace("```json", "").replace("```", "").strip()
-            parsed = json.loads(response_text)
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn JSON only as a list of strings.",
+            )
             if isinstance(parsed, list):
                 return [str(item).strip() for item in parsed if item]
             return []

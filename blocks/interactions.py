@@ -156,7 +156,7 @@ def get_nudge_block(assumption: dict) -> list:
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Keep Testing"},
+                    "text": {"type": "plain_text", "text": "Still True (Keep)"},
                     "style": "primary",
                     "action_id": "keep_testing",
                     "value": str(assumption["id"]),

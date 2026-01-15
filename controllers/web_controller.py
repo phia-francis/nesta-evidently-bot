@@ -35,14 +35,14 @@ def create_web_app(
                 return web.Response(text="Project not found.", status=404)
             integrations = project.get("integrations") or {}
             drive_settings = dict(integrations.get("drive") or {})
-            drive_settings.update(
-                {
-                    "connected": True,
-                    "access_token": token_response.get("access_token"),
-                    "refresh_token": token_response.get("refresh_token"),
-                    "expires_in": token_response.get("expires_in"),
-                }
+            await asyncio.to_thread(
+                db_service.update_google_tokens,
+                project_id,
+                token_response.get("access_token"),
+                token_response.get("refresh_token"),
+                token_response.get("expires_in"),
             )
+            drive_settings.update({"connected": True})
             integrations["drive"] = drive_settings
             await asyncio.to_thread(db_service.update_project_integrations, project_id, integrations)
             return web.Response(

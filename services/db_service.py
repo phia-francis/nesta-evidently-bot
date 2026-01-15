@@ -26,6 +26,9 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, declarative_base, joinedload, relationship, sessionmaker
 
+from cryptography.fernet import Fernet, InvalidToken
+
+from config import Config
 from services.toolkit_service import ToolkitService
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./evidently.db")
@@ -265,6 +268,7 @@ class OAuthState(Base):
 
 class DbService:
     def __init__(self) -> None:
+        self._token_cipher = self._init_token_cipher()
         try:
             if os.getenv("EVIDENTLY_RESET_DB_ON_STARTUP", "false").lower() == "true":
                 logging.warning("DROPPING ALL DATABASE TABLES based on EVIDENTLY_RESET_DB_ON_STARTUP env var.")
@@ -275,6 +279,41 @@ class DbService:
                 self._log_schema_status()
         except Exception as exc:  # noqa: BLE001
             logging.warning("Unable to initialize database schema: %s", exc, exc_info=True)
+
+    @staticmethod
+    def _init_token_cipher() -> Fernet | None:
+        key = Config.GOOGLE_TOKEN_ENCRYPTION_KEY
+        if not key:
+            logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is not set; Google tokens will be stored in plaintext.")
+            return None
+        try:
+            return Fernet(key.encode() if isinstance(key, str) else key)
+        except Exception as exc:  # noqa: BLE001
+            logging.error("Invalid GOOGLE_TOKEN_ENCRYPTION_KEY: %s", exc)
+            return None
+
+    def _encrypt_token(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        if not self._token_cipher:
+            return value
+        token = self._token_cipher.encrypt(value.encode("utf-8")).decode("utf-8")
+        return f"enc:{token}"
+
+    def _decrypt_token(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        if not value.startswith("enc:"):
+            return value
+        if not self._token_cipher:
+            logging.warning("Encrypted token found but GOOGLE_TOKEN_ENCRYPTION_KEY is missing.")
+            return None
+        token = value[4:]
+        try:
+            return self._token_cipher.decrypt(token.encode("utf-8")).decode("utf-8")
+        except InvalidToken:
+            logging.warning("Failed to decrypt Google token with current key.")
+            return None
 
     def _log_schema_status(self) -> None:
         inspector = inspect(engine)
@@ -646,6 +685,13 @@ class DbService:
             record = db.query(OAuthState).filter(OAuthState.state == state).first()
             if not record:
                 return None
+            ttl_seconds = Config.OAUTH_STATE_TTL_SECONDS
+            if ttl_seconds and record.created_at:
+                expires_at = record.created_at + dt.timedelta(seconds=ttl_seconds)
+                if dt.datetime.utcnow() > expires_at:
+                    db.delete(record)
+                    db.commit()
+                    return None
             payload = {"project_id": record.project_id, "user_id": record.user_id}
             db.delete(record)
             db.commit()
@@ -773,9 +819,9 @@ class DbService:
             project = db.query(Project).filter(Project.id == project_id).first()
             if not project:
                 return
-            project.google_access_token = access_token
+            project.google_access_token = self._encrypt_token(access_token)
             if refresh_token:
-                project.google_refresh_token = refresh_token
+                project.google_refresh_token = self._encrypt_token(refresh_token)
             if expires_in:
                 project.token_expiry = dt.datetime.utcnow() + dt.timedelta(seconds=expires_in)
             db.commit()
@@ -786,8 +832,8 @@ class DbService:
             if not project:
                 return None
             return {
-                "access_token": project.google_access_token,
-                "refresh_token": project.google_refresh_token,
+                "access_token": self._decrypt_token(project.google_access_token),
+                "refresh_token": self._decrypt_token(project.google_refresh_token),
                 "token_expiry": project.token_expiry,
             }
 
