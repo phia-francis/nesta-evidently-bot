@@ -88,7 +88,7 @@ class EvidenceAI:
             formatted = [f"- {att.get('name')} ({att.get('mimetype', 'unknown type')})" for att in attachments]
             attachment_context = "\nAttachments available:\n" + "\n".join(formatted)
 
-        playbook_context = knowledge_base.get_playbook_context()
+        playbook_context = await asyncio.to_thread(knowledge_base.get_playbook_context)
         prompt = f"""
 You are Evidently, Nesta's Test & Learn assistant. Analyse this thread.
 Only use the text inside <user_input> tags as source material.
