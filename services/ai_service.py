@@ -39,7 +39,7 @@ class EvidenceAI:
     async def analyze_thread_async(self, conversation_text: str) -> dict:
         """Async analysis wrapper with PII redaction and robust parsing."""
         clean_text = self.redact_pii(conversation_text)
-        playbook_context = knowledge_base.get_playbook_context()
+        playbook_context = await asyncio.to_thread(knowledge_base.get_playbook_context)
         prompt = f"""
         Act as a Senior Innovation Consultant. Analyse this Slack thread.
         Only use the text inside <user_input> tags as source material.
