@@ -59,6 +59,16 @@ class EvidenceAI:
             )
             return self._parse_json_response(retry_response.text)
 
+    def _redact_response_snippets(self, parsed: dict | list) -> dict | list:
+        if isinstance(parsed, dict):
+            for assumption in parsed.get("assumptions", []):
+                assumption["text"] = self.redact_pii(assumption.get("text", ""))
+                if "evidence_snippet" in assumption:
+                    assumption["evidence_snippet"] = self.redact_pii(assumption.get("evidence_snippet", ""))
+                if "source_snippet" in assumption:
+                    assumption["source_snippet"] = self.redact_pii(assumption.get("source_snippet", ""))
+        return parsed
+
     @staticmethod
     def redact_pii(text: str) -> str:
         return _PII_REGEX.sub("[redacted]", text)
@@ -108,14 +118,7 @@ class EvidenceAI:
 
         try:
             parsed = self._parse_json_response(response.text)
-            if isinstance(parsed, dict):
-                for assumption in parsed.get("assumptions", []):
-                    assumption["text"] = self.redact_pii(assumption.get("text", ""))
-                    if "evidence_snippet" in assumption:
-                        assumption["evidence_snippet"] = self.redact_pii(assumption.get("evidence_snippet", ""))
-                    if "source_snippet" in assumption:
-                        assumption["source_snippet"] = self.redact_pii(assumption.get("source_snippet", ""))
-            return parsed
+            return self._redact_response_snippets(parsed)
         except json.JSONDecodeError:
             retry_prompt = f"{prompt}\nReturn only valid JSON. No markdown or commentary."
             retry_response = await loop.run_in_executor(
@@ -124,16 +127,7 @@ class EvidenceAI:
             )
             try:
                 parsed = self._parse_json_response(retry_response.text)
-                if isinstance(parsed, dict):
-                    for assumption in parsed.get("assumptions", []):
-                        assumption["text"] = self.redact_pii(assumption.get("text", ""))
-                        if "evidence_snippet" in assumption:
-                            assumption["evidence_snippet"] = self.redact_pii(
-                                assumption.get("evidence_snippet", "")
-                            )
-                        if "source_snippet" in assumption:
-                            assumption["source_snippet"] = self.redact_pii(assumption.get("source_snippet", ""))
-                return parsed
+                return self._redact_response_snippets(parsed)
             except json.JSONDecodeError:
                 return {"summary": response.text, "decisions": [], "assumptions": []}
         except Exception:  # noqa: BLE001
@@ -195,13 +189,7 @@ Playbook Reference:
             )
             if not isinstance(parsed, dict):
                 return {"error": "Could not analyse thread due to invalid JSON payload."}
-            for assumption in parsed.get("assumptions", []):
-                assumption["text"] = self.redact_pii(assumption.get("text", ""))
-                if "evidence_snippet" in assumption:
-                    assumption["evidence_snippet"] = self.redact_pii(assumption.get("evidence_snippet", ""))
-                if "source_snippet" in assumption:
-                    assumption["source_snippet"] = self.redact_pii(assumption.get("source_snippet", ""))
-            return parsed
+            return self._redact_response_snippets(parsed)
         except json.JSONDecodeError as exc:
             logger.error("AI Analysis - Failed to parse JSON", exc_info=True)
             return {"error": f"Could not analyse thread due to invalid format: {exc}"}
