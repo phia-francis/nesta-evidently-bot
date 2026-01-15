@@ -151,7 +151,7 @@ def get_home_view(
         all_projects = [*all_projects, {"name": project["name"], "id": project["id"]}]
     if all_projects:
         project_options = [
-            {"text": {"type": "plain_text", "text": item["name"][:75]}, "value": str(item["id"])}
+_MAX_PROJECT_NAME_LENGTH_SLACK_UI = 75
             for item in all_projects
         ]
         initial_option = next(
