@@ -18,6 +18,117 @@ def experiment_modal(assumption_text: str, suggestions: str) -> dict:
     }
 
 
+def open_log_assumption_modal(ai_data: dict | None = None) -> dict:
+    ai_data = ai_data or {}
+    def _truncate(text: str) -> str:
+        if len(text) <= 2900:
+            return text
+        return text[:2897] + "..."
+    category_options = [
+        {"text": {"type": "plain_text", "text": "Opportunity"}, "value": "Opportunity"},
+        {"text": {"type": "plain_text", "text": "Capability"}, "value": "Capability"},
+        {"text": {"type": "plain_text", "text": "Progress"}, "value": "Progress"},
+    ]
+    initial_category = next(
+        (option for option in category_options if option["value"] == ai_data.get("category")),
+        category_options[0],
+    )
+    lane_options = [
+        {"text": {"type": "plain_text", "text": "Now"}, "value": "Now"},
+        {"text": {"type": "plain_text", "text": "Next"}, "value": "Next"},
+        {"text": {"type": "plain_text", "text": "Later"}, "value": "Later"},
+    ]
+    status_options = [
+        {"text": {"type": "plain_text", "text": "Testing"}, "value": "Testing"},
+        {"text": {"type": "plain_text", "text": "Validated"}, "value": "Validated"},
+        {"text": {"type": "plain_text", "text": "Rejected"}, "value": "Rejected"},
+    ]
+    initial_lane = next(
+        (option for option in lane_options if option["value"] == ai_data.get("lane")),
+        None,
+    )
+    initial_status = next(
+        (option for option in status_options if option["value"] == ai_data.get("status")),
+        None,
+    )
+    return {
+        "type": "modal",
+        "callback_id": "create_assumption_submit",
+        "private_metadata": "ai_draft",
+        "title": {"type": "plain_text", "text": "Log Assumption"},
+        "submit": {"type": "plain_text", "text": "Save"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": "✨ AI drafted this based on your conversation. Edit before saving.",
+                    }
+                ],
+            },
+            {
+                "type": "input",
+                "block_id": "assumption_title",
+                "label": {"type": "plain_text", "text": "Assumption Text"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "title_input",
+                    "initial_value": _truncate(ai_data.get("text", "")),
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "assumption_category",
+                "label": {"type": "plain_text", "text": "Category"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "assumption_category_select",
+                    "options": category_options,
+                    "initial_option": initial_category,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "assumption_lane",
+                "label": {"type": "plain_text", "text": "Lane"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "lane_input",
+                    "options": lane_options,
+                    "initial_option": initial_lane,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "assumption_status",
+                "label": {"type": "plain_text", "text": "Validation status"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "status_input",
+                    "options": status_options,
+                    "initial_option": initial_status,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "assumption_density",
+                "label": {"type": "plain_text", "text": "Evidence density (docs)"},
+                "element": {"type": "plain_text_input", "action_id": "density_input"},
+            },
+            {
+                "type": "input",
+                "block_id": "assumption_evidence_link",
+                "optional": True,
+                "label": {"type": "plain_text", "text": "Evidence Link"},
+                "hint": {"type": "plain_text", "text": "Link to research or data backing this."},
+                "element": {"type": "plain_text_input", "action_id": "evidence_link_input"},
+            },
+        ],
+    }
+
+
 def decision_room_modal() -> dict:
     """Modal for consensus scoring in the Decision Room."""
     options = [{"text": {"type": "plain_text", "text": str(i)}, "value": str(i)} for i in range(1, 6)]

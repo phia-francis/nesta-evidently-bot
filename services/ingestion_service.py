@@ -5,10 +5,17 @@ import re
 import docx
 import pdfplumber
 
+from services.drive_service import DriveService
+from services.db_service import DbService
+
 logger = logging.getLogger(__name__)
 
 
 class IngestionService:
+    def __init__(self, db_service: DbService | None = None, drive_service: DriveService | None = None) -> None:
+        self.db_service = db_service
+        self.drive_service = drive_service or DriveService()
+
     def extract_text(self, file_content: bytes, file_type: str) -> str | None:
         """Extract text from a supported file type.
 
@@ -43,6 +50,49 @@ class IngestionService:
             return None
 
         return self.sanitize_text(text)[:50000]
+
+    def process_drive_files(self, project_id: int) -> str:
+        if not self.db_service:
+            logger.warning("DbService missing for drive processing.")
+            return ""
+        project = self.db_service.get_project(project_id)
+        if not project:
+            return ""
+        integrations = project.get("integrations") or {}
+        drive_info = integrations.get("drive") or {}
+        files = drive_info.get("files") or []
+        if not files:
+            return ""
+
+        content_parts: list[str] = []
+        for file_item in files:
+            file_id = file_item.get("id")
+            if not file_id:
+                continue
+            mime_type = file_item.get("mime_type")
+            if not mime_type:
+                metadata = self.drive_service.get_file_metadata(file_id) or {}
+                mime_type = metadata.get("mimeType")
+            if not mime_type:
+                continue
+
+            if "google-apps.document" in mime_type:
+                text = self.drive_service.get_file_content(file_id)
+                if text:
+                    content_parts.append(text)
+                continue
+
+            file_bytes = self.drive_service.download_file(file_id)
+            if not file_bytes:
+                continue
+            text = self.extract_text(file_bytes, mime_type)
+            if text:
+                content_parts.append(text)
+
+        return "\n".join(content_parts).strip()
+
+    def ingest_project_files(self, project_id: int) -> str:
+        return self.process_drive_files(project_id)
 
     def extract_text_payload(self, file_content: bytes, file_type: str) -> dict:
         """Extract and chunk text for downstream ingestion.

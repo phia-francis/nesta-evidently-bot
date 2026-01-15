@@ -1,28 +1,42 @@
-import unittest
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+
+import google.generativeai as genai
 
 from services.ai_service import EvidenceAI
 
 
-class TestEvidenceAI(unittest.TestCase):
-    @patch("services.ai_service.genai.configure")
-    def test_generate_canvas_from_doc_handles_failure(self, _configure):
-        ai = EvidenceAI()
-        ai.model = MagicMock()
-        ai.model.generate_content.side_effect = Exception("API failure")
+class DummyModel:
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
 
-        result = ai.generate_canvas_from_doc("Sample document")
+    def generate_content(self, *_args, **_kwargs):
+        return SimpleNamespace(text="{}")
 
-        self.assertEqual(result["canvas_data"]["problem"], "")
-        self.assertEqual(result["gaps_identified"], [])
 
-    @patch("services.ai_service.genai.configure")
-    def test_scout_market_handles_failure(self, _configure):
-        ai = EvidenceAI()
-        ai.model = MagicMock()
-        ai.model.generate_content.side_effect = Exception("API failure")
+def _build_ai(response_text: str) -> EvidenceAI:
+    class ResponseModel(DummyModel):
+        def generate_content(self, *_args, **_kwargs):
+            return SimpleNamespace(text=response_text)
 
-        result = ai.scout_market("Problem statement", region="UK")
+    original_model = genai.GenerativeModel
+    genai.GenerativeModel = ResponseModel  # type: ignore[assignment]
+    try:
+        return EvidenceAI()
+    finally:
+        genai.GenerativeModel = original_model  # type: ignore[assignment]
 
-        self.assertEqual(result["competitors"], [])
-        self.assertEqual(result["risks"], [])
+
+def test_analyze_thread_structured_handles_markdown_json():
+    ai = _build_ai(
+        "```json\n"
+        '{"summary": "ok", "decisions": [], "assumptions": [], "recommended_methods": [], "suggested_method": ""}'
+        "\n```"
+    )
+    result = ai.analyze_thread_structured("hello world")
+    assert result["summary"] == "ok"
+
+
+def test_analyze_thread_structured_handles_bad_json():
+    ai = _build_ai("```json\n{bad}\n```")
+    result = ai.analyze_thread_structured("hello world")
+    assert "error" in result

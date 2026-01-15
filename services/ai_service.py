@@ -25,6 +25,10 @@ class EvidenceAI:
         self.model = genai.GenerativeModel(_GEMINI_MODEL_NAME)
 
     @staticmethod
+    def _clean_json_text(text: str) -> str:
+        return text.replace("```json", "").replace("```", "").strip()
+
+    @staticmethod
     def redact_pii(text: str) -> str:
         return _PII_REGEX.sub("[redacted]", text)
 
@@ -35,6 +39,7 @@ class EvidenceAI:
     async def analyze_thread_async(self, conversation_text: str) -> dict:
         """Async analysis wrapper with PII redaction and robust parsing."""
         clean_text = self.redact_pii(conversation_text)
+        playbook_context = await asyncio.to_thread(knowledge_base.get_playbook_context)
         prompt = f"""
         Act as a Senior Innovation Consultant. Analyse this Slack thread.
         Only use the text inside <user_input> tags as source material.
@@ -43,31 +48,38 @@ class EvidenceAI:
 
         TASK:
         1. Summarise the 'So What?' in one punchy sentence.
-        2. Extract **Assumptions** mapped to OCP categories.
-        3. Assign a **Confidence Score** (0-100%) to each assumption based on evidence mentioned.
+        2. List hard decisions made.
+        3. Extract assumptions mapped to OCP categories with confidence scores (0-100).
+        4. Suggest relevant Test & Learn methods from the playbook.
+        5. If Value Risk is detected, set suggested_method to "Fake Door Test".
+           If Feasibility Risk is detected, set suggested_method to "Prototype".
 
         FORMAT (Strict JSON):
         {{
-            "summary": "...",
+            "summary": "string",
+            "decisions": ["string"],
             "assumptions": [
-                {{"category": "Opportunity", "text": "...", "confidence": 80}},
-                {{"category": "Capability", "text": "...", "confidence": 40}}
+                {{"text": "string", "category": "Opportunity|Capability|Progress", "confidence": 80}}
             ],
-            "action_items": ["..."]
+            "recommended_methods": ["Method name"],
+            "suggested_method": "string"
         }}
 
         Conversation:
         {self._wrap_user_input(clean_text)}
+
+        Playbook Reference:
+        {playbook_context}
         """
 
         loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(None, lambda: self.model.generate_content(prompt))
 
         try:
-            clean_json = response.text.replace("```json", "").replace("```", "")
+            clean_json = self._clean_json_text(response.text)
             return json.loads(clean_json)
         except Exception:  # noqa: BLE001
-            return {"summary": response.text, "assumptions": [], "action_items": []}
+            return {"summary": response.text, "decisions": [], "assumptions": []}
 
     def analyze_thread_structured(self, conversation_text: str, attachments: Iterable[dict] | None = None) -> dict:
         """Analyse a Slack thread or document and return structured OCP data."""
@@ -76,47 +88,53 @@ class EvidenceAI:
             formatted = [f"- {att.get('name')} ({att.get('mimetype', 'unknown type')})" for att in attachments]
             attachment_context = "\nAttachments available:\n" + "\n".join(formatted)
 
+        playbook_context = await asyncio.to_thread(knowledge_base.get_playbook_context)
         prompt = f"""
-You are Evidently, an innovation assistant. Analyse this thread.
+You are Evidently, Nesta's Test & Learn assistant. Analyse this thread.
 Only use the text inside <user_input> tags as source material.
 
-TASK 1: "SO WHAT?" SUMMARY
-Provide a single, punchy sentence explaining the practical implication of this discussion.
-Format: "We agreed to [ACTION] because [RATIONALE], which unlocks [OUTCOME]."
+TASKS:
+1. Provide a single-sentence "So What?" executive summary.
+2. List hard decisions made in the conversation.
+3. Extract assumptions mapped to the OCP framework (Opportunity, Capability, Progress).
+   Use this logic:
+   - Opportunity: end users, pain points, market size, paying customer risk.
+   - Progress: solution/offer, USP, user experience, technical/legal risk.
+   - Capability: champions, funding, partners/supply chain, delivery at scale.
+   For each, assign a confidence score (0-100) based on evidence mentioned.
+4. Suggest relevant Test & Learn methods from the playbook when helpful.
+5. If Value Risk is detected, set suggested_method to "Fake Door Test".
+   If Feasibility Risk is detected, set suggested_method to "Prototype".
 
-TASK 2: EXTRACT ASSUMPTIONS
-Identify assumptions mapping to the OCP framework (Opportunity, Capability, Progress).
-For each, assign a confidence score (0-100) based on evidence mentioned, not just sentiment.
-
-TASK 3: PROVENANCE
-Identify the source of the insight. If a specific document or user stated it, quote them.
-
-RETURN JSON ONLY.
+Return JSON only in this exact shape (no Markdown, no commentary):
 {{
-    "so_what_summary": "string",
+    "summary": "string",
+    "decisions": ["string"],
     "assumptions": [
         {{
             "text": "string",
             "category": "Opportunity|Capability|Progress",
-            "confidence_score": int,
-            "evidence_snippet": "string",
-            "source_user": "string"
+            "confidence": 0
         }}
-    ]
+    ],
+    "recommended_methods": ["Method name"],
+    "suggested_method": "string"
 }}
 
 Conversation:
 {self._wrap_user_input(self.redact_pii(conversation_text))}
 {attachment_context}
+
+Playbook Reference:
+{playbook_context}
 """
 
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
-            response_text = response.text
+            response_text = self._clean_json_text(response.text)
             parsed = json.loads(response_text)
             for assumption in parsed.get("assumptions", []):
                 assumption["text"] = self.redact_pii(assumption.get("text", ""))
-                assumption["evidence_snippet"] = self.redact_pii(assumption.get("evidence_snippet", ""))
             return parsed
         except json.JSONDecodeError as exc:
             logger.error("AI Analysis - Failed to parse JSON", exc_info=True)
@@ -124,6 +142,74 @@ Conversation:
         except Exception as exc:  # noqa: BLE001
             logger.error("AI Analysis - General failure", exc_info=True)
             return {"error": f"Could not analyse thread: {exc}"}
+
+    def suggest_experiments(self, assumption_text: str) -> list[str]:
+        """Suggest three low-fidelity experiments for a given assumption."""
+        if not assumption_text:
+            return []
+        prompt = (
+            "You are Evidently, Nesta's Test & Learn assistant. "
+            "Generate three specific, low-fidelity experiment ideas for the assumption below. "
+            "Infer whether the assumption is Opportunity, Capability, or Progress and tailor suggestions accordingly. "
+            "Return JSON only as a list of strings."
+            f"\nAssumption: {self._wrap_user_input(self.redact_pii(assumption_text))}"
+        )
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            response_text = self._clean_json_text(response.text)
+            parsed = json.loads(response_text)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+            return []
+        except json.JSONDecodeError:
+            logger.exception("Failed to parse Gemini response for experiment suggestions")
+            return []
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to generate experiment suggestions")
+            return []
+
+    def generate_ocp_draft(self, context_text: str) -> dict:
+        if not context_text:
+            return {"error": "No context provided."}
+        prompt = f"""
+You are an expert Innovation Consultant. Read the attached project documents.
+Extract key information to fill the "Innovation Canvas" (OCP Framework).
+
+RETURN JSON ONLY:
+{{
+  "Opportunity": {{
+     "User Needs": "...",
+     "Market Size": "..."
+  }},
+  "Capability": {{
+     "Resources": "...",
+     "Partners": "..."
+  }},
+  "Progress": {{
+     "Solution Description": "...",
+     "Unique Selling Point": "..."
+  }},
+  "Insights": [
+     "Based on the 'Test & Learn Playbook', I recommend a [Method Name] because [Reason]."
+  ]
+}}
+
+Documents:
+{self._wrap_user_input(self.redact_pii(context_text))}
+"""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            response_text = self._clean_json_text(response.text)
+            return json.loads(response_text)
+        except json.JSONDecodeError as exc:
+            logger.error("Failed to parse OCP draft JSON", exc_info=True)
+            return {"error": f"Could not generate OCP draft: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to generate OCP draft", exc_info=True)
+            return {"error": f"Could not generate OCP draft: {exc}"}
+
+    def extract_ocp_from_text(self, context_text: str) -> dict:
+        return self.generate_ocp_draft(context_text)
 
     def extract_assumptions(self, text: str) -> list[str]:
         if not text:
@@ -136,7 +222,7 @@ Conversation:
         try:
             clean_text = self.redact_pii(text)
             response = self.model.generate_content(f"{system_prompt}\n\n{clean_text}")
-            content = response.text.replace("```json", "").replace("```", "").strip()
+            content = self._clean_json_text(response.text)
             parsed = json.loads(content or "[]")
             if isinstance(parsed, list):
                 return [str(item).strip() for item in parsed if str(item).strip()]
@@ -150,6 +236,9 @@ Conversation:
 
     def generate_experiment_suggestions(self, assumption: str) -> str:
         """Suggest rapid experiments for a given assumption."""
+        suggestions = self.suggest_experiments(assumption)
+        if suggestions:
+            return "\n".join(f"- {item}" for item in suggestions)
         prompt = (
             "You are Evidently, Nesta's Test & Learn assistant. Based on the assumption below, "
             "return three succinct experiment methods (e.g., Fake Door, Interview, Prototype) "

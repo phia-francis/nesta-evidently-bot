@@ -923,14 +923,64 @@ class UIManager:
         }
 
     @staticmethod
-    def render_create_assumption_modal() -> dict[str, Any]:
+    def _ocp_prompt_text(category: str) -> str:
+        if category == "Opportunity":
+            return (
+                "*Opportunity prompts*\n"
+                "• Needs: Who is the end user? What pain point or task are we solving?\n"
+                "• Market: How big is the market, what trends matter, and who are the competitors?\n"
+                "• Rules: What regulations, standards, or ethical issues apply?\n"
+                "• Risk: What risks are most likely, and how will we mitigate them?"
+            )
+        if category == "Progress":
+            return (
+                "*Progress prompts*\n"
+                "• Approach: What is the offer and what is the USP?\n"
+                "• Experience: How will users discover, pay for, and use it over time?\n"
+                "• Impact: What economic, social, or environmental benefits are expected?\n"
+                "• IP: What new or existing IP is relevant and how will it be protected?"
+            )
+        return (
+            "*Capability prompts*\n"
+            "• Leadership: Who are the champions and what strategy supports delivery?\n"
+            "• Finance: What revenue targets, costs, and funding are required?\n"
+            "• R&D: What design, testing, and technical capabilities are in place?\n"
+            "• Operations: What skills, partners, and infrastructure are needed?"
+        )
+
+    @staticmethod
+    def render_create_assumption_modal(
+        selected_category: str = "Opportunity",
+        initial_values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        initial_values = initial_values or {}
         category_options = [
-            {"text": {"type": "plain_text", "text": "Value"}, "value": "Value"},
-            {"text": {"type": "plain_text", "text": "Growth"}, "value": "Growth"},
-            {"text": {"type": "plain_text", "text": "Sustainability"}, "value": "Sustainability"},
-            {"text": {"type": "plain_text", "text": "Impact"}, "value": "Impact"},
-            {"text": {"type": "plain_text", "text": "Feasibility"}, "value": "Feasibility"},
+            {"text": {"type": "plain_text", "text": "Opportunity"}, "value": "Opportunity"},
+            {"text": {"type": "plain_text", "text": "Capability"}, "value": "Capability"},
+            {"text": {"type": "plain_text", "text": "Progress"}, "value": "Progress"},
         ]
+        initial_category = next(
+            (option for option in category_options if option["value"] == selected_category),
+            category_options[0],
+        )
+        lane_options = [
+            {"text": {"type": "plain_text", "text": "Now"}, "value": "Now"},
+            {"text": {"type": "plain_text", "text": "Next"}, "value": "Next"},
+            {"text": {"type": "plain_text", "text": "Later"}, "value": "Later"},
+        ]
+        status_options = [
+            {"text": {"type": "plain_text", "text": "Testing"}, "value": "Testing"},
+            {"text": {"type": "plain_text", "text": "Validated"}, "value": "Validated"},
+            {"text": {"type": "plain_text", "text": "Rejected"}, "value": "Rejected"},
+        ]
+        initial_lane = next(
+            (option for option in lane_options if option["value"] == initial_values.get("lane")),
+            None,
+        )
+        initial_status = next(
+            (option for option in status_options if option["value"] == initial_values.get("status")),
+            None,
+        )
         return {
             "type": "modal",
             "callback_id": "create_assumption_submit",
@@ -938,10 +988,18 @@ class UIManager:
             "submit": {"type": "plain_text", "text": "Add"},
             "blocks": [
                 {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": UIManager._ocp_prompt_text(selected_category)},
+                },
+                {
                     "type": "input",
                     "block_id": "assumption_title",
                     "label": {"type": "plain_text", "text": "Roadmap item"},
-                    "element": {"type": "plain_text_input", "action_id": "title_input"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "title_input",
+                        "initial_value": initial_values.get("title", ""),
+                    },
                 },
                 {
                     "type": "input",
@@ -949,9 +1007,9 @@ class UIManager:
                     "label": {"type": "plain_text", "text": "Risk Category"},
                     "element": {
                         "type": "static_select",
-                        "action_id": "category_input",
+                        "action_id": "assumption_category_select",
                         "options": category_options,
-                        "initial_option": category_options[0],
+                        "initial_option": initial_category,
                     },
                 },
                 {
@@ -961,11 +1019,8 @@ class UIManager:
                     "element": {
                         "type": "static_select",
                         "action_id": "lane_input",
-                        "options": [
-                            {"text": {"type": "plain_text", "text": "Now"}, "value": "Now"},
-                            {"text": {"type": "plain_text", "text": "Next"}, "value": "Next"},
-                            {"text": {"type": "plain_text", "text": "Later"}, "value": "Later"},
-                        ],
+                        "options": lane_options,
+                        "initial_option": initial_lane,
                     },
                 },
                 {
@@ -975,18 +1030,19 @@ class UIManager:
                     "element": {
                         "type": "static_select",
                         "action_id": "status_input",
-                        "options": [
-                            {"text": {"type": "plain_text", "text": "Testing"}, "value": "Testing"},
-                            {"text": {"type": "plain_text", "text": "Validated"}, "value": "Validated"},
-                            {"text": {"type": "plain_text", "text": "Rejected"}, "value": "Rejected"},
-                        ],
+                        "options": status_options,
+                        "initial_option": initial_status,
                     },
                 },
                 {
                     "type": "input",
                     "block_id": "assumption_density",
                     "label": {"type": "plain_text", "text": "Evidence density (docs)"},
-                    "element": {"type": "plain_text_input", "action_id": "density_input"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "density_input",
+                        "initial_value": initial_values.get("density", ""),
+                    },
                 },
                 {
                     "type": "input",
@@ -994,7 +1050,11 @@ class UIManager:
                     "optional": True,
                     "label": {"type": "plain_text", "text": "Evidence Link"},
                     "hint": {"type": "plain_text", "text": "Link to research or data backing this."},
-                    "element": {"type": "plain_text_input", "action_id": "evidence_link_input"},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "evidence_link_input",
+                        "initial_value": initial_values.get("evidence_link", ""),
+                    },
                 },
             ],
         }
