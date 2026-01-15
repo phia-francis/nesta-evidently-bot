@@ -1148,8 +1148,7 @@ class DbService:
                 db.query(Assumption)
                 .options(joinedload(Assumption.project))
                 .filter(
-                    or_(Assumption.status == "Testing", Assumption.validation_status == "Testing"),
-                    func.coalesce(Assumption.last_tested_at, Assumption.updated_at) < cutoff,
+                    Assumption.status == "Testing",
                 )
                 .all()
             )
