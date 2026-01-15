@@ -59,6 +59,19 @@ class DriveService:
             logger.error("Failed to read Google Drive metadata for %s", file_id, exc_info=True)
             return None
 
+    def download_file(self, file_id: str) -> bytes | None:
+        if not self.drive_service:
+            return None
+        try:
+            request = self.drive_service.files().get_media(fileId=file_id)
+            return request.execute()
+        except HttpError:
+            logger.error("Failed to download Drive file %s", file_id, exc_info=True)
+            return None
+        except Exception:
+            logger.error("Unexpected error downloading Drive file %s", file_id, exc_info=True)
+            return None
+
     def _read_structural_elements(self, elements):
         text_parts = []
         if not elements:

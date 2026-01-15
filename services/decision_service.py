@@ -13,10 +13,18 @@ class DecisionRoomService:
     def __init__(self, db_service: DbService):
         self.db = db_service
 
-    def start_session(self, client, channel_id: str, user_id: str):
-        project = self.db.get_active_project(user_id)
+    def start_session(
+        self,
+        channel_id: str,
+        client=None,
+        user_id: str | None = None,
+    ) -> tuple[bool, str, int | None]:
+        if user_id:
+            project = self.db.get_active_project(user_id)
+        else:
+            project = self.db.get_project_by_channel(channel_id)
         if not project:
-            return False, "You need to select a project in the Home Tab first."
+            return False, "You need to select a project in the Home Tab first.", None
 
         session_id = self.db.create_decision_session(project["id"], channel_id)
 
@@ -27,7 +35,7 @@ class DecisionRoomService:
         ]
 
         if not assumptions:
-            return False, "No pending assumptions to vote on! Add some first."
+            return False, "No pending assumptions to vote on! Add some first.", session_id
 
         blocks = [
             HeaderBlock(text=f"🗳️ Decision Room: {project['name']}").to_dict(),
@@ -42,11 +50,7 @@ class DecisionRoomService:
 
         for assumption in assumptions:
             blocks.append(
-                SectionBlock(
-                    text=(
-                        f"*{assumption['title']}* \nStatus: {assumption['validation_status']}"
-                    )
-                ).to_dict()
+                SectionBlock(text=(f"*{assumption['title']}* \nStatus: {assumption['validation_status']}")).to_dict()
             )
             blocks.append(
                 ActionsBlock(
@@ -75,8 +79,58 @@ class DecisionRoomService:
             ).to_dict()
         )
 
-        client.chat_postMessage(channel=channel_id, blocks=blocks, text="Decision Room Opened")
-        return True, "Session Started"
+        if client:
+            client.chat_postMessage(channel=channel_id, blocks=blocks, text="Decision Room Opened")
+        return True, "Session Started", session_id
+
+    def record_vote(
+        self,
+        assumption_id: int,
+        user_id: str,
+        impact_score: int,
+        uncertainty_score: int,
+    ) -> None:
+        self.db.record_decision_vote(
+            assumption_id=assumption_id,
+            user_id=user_id,
+            impact=impact_score,
+            uncertainty=uncertainty_score,
+        )
+
+    def reveal_results(self, assumption_id: int) -> dict:
+        summary = self.db.get_decision_vote_summary(assumption_id)
+        avg_impact = summary.get("avg_impact", 0.0)
+        avg_uncertainty = summary.get("avg_uncertainty", 0.0)
+        if avg_impact >= 4 and avg_uncertainty >= 4:
+            guidance = "High Impact, High Uncertainty → Do this first."
+        elif avg_impact >= 4 and avg_uncertainty < 4:
+            guidance = "High Impact, Lower Uncertainty → Move quickly."
+        elif avg_impact < 4 and avg_uncertainty >= 4:
+            guidance = "Lower Impact, High Uncertainty → Park and learn."
+        else:
+            guidance = "Lower Impact, Lower Uncertainty → Schedule later."
+
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        "*Decision Room Summary*\n"
+                        f"Average Impact: {avg_impact:.2f}\n"
+                        f"Average Uncertainty: {avg_uncertainty:.2f}\n"
+                        f"{guidance}"
+                    ),
+                },
+            }
+        ]
+        return {
+            "avg_impact": avg_impact,
+            "avg_uncertainty": avg_uncertainty,
+            "count": summary.get("count", 0),
+            "guidance": guidance,
+            "blocks": blocks,
+        }
 
     def reveal_scores(self, session_id: int) -> dict[int, dict[str, float | int | bool]]:
         scores = self.db.get_session_scores(session_id)

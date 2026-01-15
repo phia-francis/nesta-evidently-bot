@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import TYPE_CHECKING, Type
+from typing import TYPE_CHECKING, Callable
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from slack_sdk.errors import SlackApiError
@@ -8,14 +8,14 @@ from slack_sdk.errors import SlackApiError
 if TYPE_CHECKING:
     from slack_sdk.web.client import WebClient
 
-    from blocks.ui_manager import UIManager
+    from blocks.home_tab import get_home_view
     from services.db_service import DbService
 
 
 def update_all_dashboards(
     client: "WebClient",
     db_service: "DbService",
-    ui_manager: Type["UIManager"],
+    home_view_builder: Callable[[str, dict, list | None], dict],
 ) -> None:
     projects = db_service.get_projects_with_dashboard_message_ts()
     for project in projects:
@@ -24,8 +24,7 @@ def update_all_dashboards(
         if not channel_id or not message_ts:
             continue
         try:
-            metrics = db_service.get_metrics(project["id"])
-            view = ui_manager.get_home_view(
+            view = home_view_builder(
                 project.get("created_by", ""),
                 project,
                 [
@@ -34,8 +33,6 @@ def update_all_dashboards(
                         "id": project["id"],
                     }
                 ],
-                active_tab="overview",
-                metrics=metrics,
             )
             client.chat_update(
                 channel=channel_id,
@@ -106,10 +103,49 @@ def nudge_stale_projects(
             logging.warning("Failed to nudge project owner %s: %s", owner_id, exc)
 
 
+def check_stale_assumptions(
+    client: "WebClient",
+    db_service: "DbService",
+) -> None:
+    from blocks.interactions import get_nudge_block
+
+    stale_assumptions = db_service.get_stale_assumptions()
+    if not stale_assumptions:
+        logging.info("No stale assumptions found for nudges.")
+        return
+    for entry in stale_assumptions:
+        assumption = entry["assumption"]
+        project = entry["project"]
+        owner_id = assumption.get("owner_id") or project.get("created_by")
+        if not owner_id:
+            continue
+        try:
+            response = client.conversations_open(users=owner_id)
+            channel_id = response["channel"]["id"]
+            client.chat_postMessage(
+                channel=channel_id,
+                text="Stale assumption check-in",
+                blocks=get_nudge_block(
+                    {
+                        "id": assumption["id"],
+                        "text": assumption.get("title", "Untitled assumption"),
+                    }
+                ),
+            )
+        except SlackApiError as exc:
+            logging.warning(
+                "Failed to send stale assumption nudge for %s: %s",
+                assumption.get("id"),
+                exc,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            logging.warning("Failed to build stale assumption nudge: %s", exc)
+
+
 def start_scheduler(
     client: "WebClient",
     db_service: "DbService",
-    ui_manager: Type["UIManager"],
+    home_view_builder: Callable[[str, dict, list | None], dict],
 ) -> BackgroundScheduler:
     def _env_int(name: str, default: int) -> int:
         value = os.environ.get(name)
@@ -127,7 +163,7 @@ def start_scheduler(
         "cron",
         hour=9,
         minute=0,
-        args=[client, db_service, ui_manager],
+        args=[client, db_service, home_view_builder],
     )
     scheduler.add_job(
         broadcast_weekly_wins,
@@ -138,7 +174,7 @@ def start_scheduler(
         args=[client, db_service],
     )
     scheduler.add_job(
-        nudge_stale_projects,
+        check_stale_assumptions,
         "cron",
         hour=_env_int("STALE_PROJECT_NUDGE_HOUR", 10),
         minute=_env_int("STALE_PROJECT_NUDGE_MINUTE", 0),

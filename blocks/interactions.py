@@ -28,7 +28,7 @@ def _generate_confidence_meter(score: int) -> str:
 
 def get_ai_summary_block(analysis: dict) -> list:
     """Renders the AI analysis with visual confidence meters and call-to-action buttons."""
-    summary = analysis.get("so_what_summary") or analysis.get("summary") or "Analysis complete."
+    summary = analysis.get("summary") or analysis.get("so_what_summary") or "Analysis complete."
     blocks: list = [
         {"type": "header", "text": {"type": "plain_text", "text": "✨ Insight Analysis"}},
         {
@@ -38,6 +38,16 @@ def get_ai_summary_block(analysis: dict) -> list:
         {"type": "divider"},
     ]
 
+    decisions = analysis.get("decisions") or []
+    if decisions:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "*Hard Decisions*\n- " + "\n- ".join(decisions)},
+            }
+        )
+        blocks.append({"type": "divider"})
+
     assumptions = analysis.get("assumptions") or []
     if assumptions:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*Extracted Assumptions (OCP)*"}})
@@ -45,8 +55,6 @@ def get_ai_summary_block(analysis: dict) -> list:
             meter = _generate_confidence_meter(item.get("confidence", item.get("confidence_score", 50)))
             category = item.get("category", "Unknown")
             category_icon = {"Opportunity": "🟡", "Capability": "🟢", "Progress": "🔵"}.get(category, "⚪")
-            provenance = item.get("source_user") or item.get("provenance_source") or item.get("source")
-            source_context = item.get("evidence_snippet") or item.get("source_id") or item.get("source_ref")
             blocks.append(
                 {
                     "type": "section",
@@ -62,33 +70,6 @@ def get_ai_summary_block(analysis: dict) -> list:
                     },
                 }
             )
-            if provenance or source_context:
-                blocks.append(
-                    {
-                        "type": "context",
-                        "elements": [
-                            {
-                                "type": "mrkdwn",
-                                "text": (
-                                    f"Source: {provenance or 'Slack thread'}"
-                                    f"{f' | Evidence: {source_context}' if source_context else ''}"
-                                ),
-                            }
-                        ],
-                    }
-                )
-
-    if analysis.get("action_items"):
-        actions = "\n- ".join(analysis["action_items"])
-        blocks.extend(
-            [
-                {"type": "divider"},
-                {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*Action Items*\n- {actions}"},
-                },
-            ]
-        )
 
     blocks.append(
         {
@@ -166,8 +147,7 @@ def get_nudge_block(assumption: dict) -> list:
                 "type": "mrkdwn",
                 "text": (
                     ":alarm_clock: *Stale Assumption Alert*\n\n"
-                    "We haven't tested this in a while:\n"
-                    f"> *{assumption['text']}*\n\nDo we still believe this is true?"
+                    f"This assumption hasn't been tested in 2 weeks: *{assumption['text']}*"
                 ),
             },
         },
@@ -176,27 +156,81 @@ def get_nudge_block(assumption: dict) -> list:
             "elements": [
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Still True (Keep)"},
+                    "text": {"type": "plain_text", "text": "Keep Testing"},
                     "style": "primary",
-                    "action_id": "keep_assumption",
-                    "value": assumption["id"],
+                    "action_id": "keep_testing",
+                    "value": str(assumption["id"]),
                 },
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Invalid (Archive)"},
+                    "text": {"type": "plain_text", "text": "Archive"},
                     "style": "danger",
                     "action_id": "archive_assumption",
-                    "value": assumption["id"],
+                    "value": str(assumption["id"]),
                 },
                 {
                     "type": "button",
-                    "text": {"type": "plain_text", "text": "Generate Experiment"},
-                    "action_id": "gen_experiment_modal",
-                    "value": assumption["text"],
+                    "text": {"type": "plain_text", "text": "Validate"},
+                    "action_id": "validate_assumption",
+                    "value": str(assumption["id"]),
                 },
             ],
         },
     ]
+
+
+def decision_vote_modal(assumption_title: str, assumption_id: int, channel_id: str) -> dict:
+    return {
+        "type": "modal",
+        "callback_id": "submit_decision_vote",
+        "private_metadata": f"{assumption_id}:{channel_id}",
+        "title": {"type": "plain_text", "text": "Decision Vote"},
+        "submit": {"type": "plain_text", "text": "Submit"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"Scoring Assumption:\n*{assumption_title}*"},
+            },
+            {"type": "divider"},
+            {
+                "type": "input",
+                "block_id": "impact_block",
+                "label": {"type": "plain_text", "text": "Impact (1 = low, 5 = high)"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "impact_score",
+                    "options": [
+                        {"text": {"type": "plain_text", "text": str(i)}, "value": str(i)}
+                        for i in range(1, 6)
+                    ],
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "uncertainty_block",
+                "label": {"type": "plain_text", "text": "Uncertainty (1 = low, 5 = high)"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "uncertainty_score",
+                    "options": [
+                        {"text": {"type": "plain_text", "text": str(i)}, "value": str(i)}
+                        for i in range(1, 6)
+                    ],
+                },
+            },
+        ],
+    }
+
+
+def decision_heatmap_label(avg_impact: float, avg_uncertainty: float) -> str:
+    if avg_impact >= 4 and avg_uncertainty >= 4:
+        return "High Impact / High Uncertainty → Do this first"
+    if avg_impact >= 4 and avg_uncertainty < 4:
+        return "High Impact / Lower Uncertainty → Move quickly"
+    if avg_impact < 4 and avg_uncertainty >= 4:
+        return "Lower Impact / High Uncertainty → Park and learn"
+    return "Lower Impact / Lower Uncertainty → Schedule later"
 
 
 def error_block(message: str) -> list:

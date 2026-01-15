@@ -5,7 +5,22 @@ import secrets
 from collections import defaultdict
 from typing import Any, Dict, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, func, inspect, or_, text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    Text,
+    create_engine,
+    func,
+    inspect,
+    or_,
+    text,
+)
 from sqlalchemy.engine.url import make_url
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -14,6 +29,21 @@ from sqlalchemy.orm import Session, declarative_base, joinedload, relationship, 
 from services.toolkit_service import ToolkitService
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./evidently.db")
+
+ASSUMPTION_CATEGORY_ENUM = Enum(
+    "Opportunity",
+    "Capability",
+    "Progress",
+    name="assumption_category",
+    native_enum=False,
+)
+ASSUMPTION_STATUS_ENUM = Enum(
+    "Testing",
+    "Validated",
+    "Rejected",
+    name="assumption_status",
+    native_enum=False,
+)
 
 
 def _build_engine() -> Engine:
@@ -122,6 +152,7 @@ class Experiment(Base):
     __tablename__ = "experiments"
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
+    assumption_id = Column(Integer, ForeignKey("assumptions.id"), nullable=True)
 
     title = Column(String(255))
     hypothesis = Column(Text)
@@ -133,12 +164,15 @@ class Experiment(Base):
     primary_kpi = Column(String(255))
     target_value = Column(String(100))
     current_value = Column(String(100))
+    kpi_target = Column(String(100))
+    kpi_actual = Column(String(100))
     dataset_link = Column(String(255))
 
     start_date = Column(DateTime)
     end_date = Column(DateTime)
 
     project = relationship("Project", back_populates="experiments")
+    assumption = relationship("Assumption", back_populates="experiments")
 
 
 class Assumption(Base):
@@ -146,19 +180,38 @@ class Assumption(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
     title = Column(String(255))
-    category = Column(String(50), default="Value")
+    category = Column(ASSUMPTION_CATEGORY_ENUM, default="Opportunity")
     evidence_link = Column(Text)
     lane = Column(String(50), default="Now")
     validation_status = Column(String(50), default="Testing")
+    status = Column(ASSUMPTION_STATUS_ENUM, default="Testing")
     evidence_density = Column(Integer, default=0)
     source_type = Column(String(50))
     source_id = Column(String(255))
     source_snippet = Column(Text)
     confidence_score = Column(Integer, default=0)
+    last_tested_at = Column(DateTime, default=dt.datetime.utcnow)
+    owner_id = Column(String(50))
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
 
     project = relationship("Project", back_populates="assumptions")
     scores = relationship("DecisionScore", back_populates="assumption")
+    experiments = relationship("Experiment", back_populates="assumption")
+    decisions = relationship("DecisionVote", back_populates="assumption")
+
+
+class DecisionVote(Base):
+    """Tracks team votes on assumption impact vs uncertainty."""
+
+    __tablename__ = "decisions"
+    id = Column(Integer, primary_key=True, index=True)
+    assumption_id = Column(Integer, ForeignKey("assumptions.id"))
+    user_id = Column(String(255))
+    impact = Column(Integer)
+    uncertainty = Column(Integer)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+
+    assumption = relationship("Assumption", back_populates="decisions")
 
 
 class DecisionSession(Base):
@@ -239,16 +292,20 @@ class DbService:
             },
             "assumptions": {
                 "validation_status",
+                "status",
                 "evidence_density",
                 "source_type",
                 "source_id",
                 "confidence_score",
+                "last_tested_at",
+                "owner_id",
                 "updated_at",
                 "category",
                 "evidence_link",
             },
             "canvas_items": {"section", "text", "ai_generated"},
-            "experiments": {"outcome"},
+            "experiments": {"outcome", "assumption_id", "kpi_target", "kpi_actual"},
+            "decisions": {"assumption_id", "impact", "uncertainty", "user_id"},
         }
         missing = []
         for table, required_cols in expected_tables.items():
@@ -286,27 +343,49 @@ class DbService:
 
                     # --- 2. Fix ASSUMPTIONS Table (The one crashing now) ---
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS validation_status VARCHAR(50) DEFAULT 'Testing';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'Testing';"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_density INTEGER DEFAULT 0;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_type VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_id VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_snippet TEXT;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 0;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMP;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS owner_id VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;"))
-                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'Value';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'Opportunity';"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_link TEXT;"))
 
                     # --- 3. Fix EXPERIMENTS Table (Prevent future crashes) ---
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS hypothesis TEXT;"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS method VARCHAR(100);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS stage VARCHAR(50);"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS assumption_id INTEGER;"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS primary_kpi VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS target_value VARCHAR(100);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS current_value VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS kpi_target VARCHAR(100);"))
+                    connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS kpi_actual VARCHAR(100);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS dataset_link VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'planning';"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS outcome VARCHAR(50) DEFAULT 'Pending';"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS start_date TIMESTAMP;"))
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS end_date TIMESTAMP;"))
+
+                    # --- 4. Add DECISIONS Table (Voting) ---
+                    connection.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS decisions (
+                                id INTEGER PRIMARY KEY,
+                                assumption_id INTEGER,
+                                user_id VARCHAR(255),
+                                impact INTEGER,
+                                uncertainty INTEGER,
+                                created_at TIMESTAMP
+                            );
+                            """
+                        )
+                    )
 
             return "✅ Database FULLY patched! (Projects, Assumptions, Experiments)"
         except SQLAlchemyError as exc:
@@ -350,6 +429,7 @@ class DbService:
                     title="We can reach the target audience through community partners.",
                     lane="Now",
                     validation_status="Testing",
+                    status="Testing",
                     evidence_density=1,
                     confidence_score=40,
                 )
@@ -857,6 +937,7 @@ class DbService:
         with SessionLocal() as db:
             experiment = Experiment(
                 project_id=project_id,
+                assumption_id=data.get("assumption_id"),
                 title=data.get("title"),
                 hypothesis=data.get("hypothesis"),
                 method=data.get("method"),
@@ -866,6 +947,8 @@ class DbService:
                 primary_kpi=data.get("primary_kpi"),
                 target_value=data.get("target_value"),
                 current_value=data.get("current_value"),
+                kpi_target=data.get("kpi_target", data.get("target_value")),
+                kpi_actual=data.get("kpi_actual", data.get("current_value")),
                 dataset_link=data.get("dataset_link"),
             )
             db.add(experiment)
@@ -903,12 +986,18 @@ class DbService:
                 experiment.outcome = data["outcome"]
                 if experiment.end_date is None and data["outcome"] in {"Validated", "Invalidated"}:
                     experiment.end_date = dt.datetime.utcnow()
+            if "assumption_id" in data:
+                experiment.assumption_id = data["assumption_id"]
             if "primary_kpi" in data:
                 experiment.primary_kpi = data["primary_kpi"]
             if "target_value" in data:
                 experiment.target_value = data["target_value"]
             if "current_value" in data:
                 experiment.current_value = data["current_value"]
+            if "kpi_target" in data:
+                experiment.kpi_target = data["kpi_target"]
+            if "kpi_actual" in data:
+                experiment.kpi_actual = data["kpi_actual"]
             if "dataset_link" in data:
                 experiment.dataset_link = data["dataset_link"]
             db.commit()
@@ -918,15 +1007,18 @@ class DbService:
             assumption = Assumption(
                 project_id=project_id,
                 title=data.get("title"),
-                category=data.get("category", "Value"),
+                category=data.get("category", "Opportunity"),
                 evidence_link=data.get("evidence_link"),
                 lane=data.get("lane", "Now"),
                 validation_status=data.get("validation_status", "Testing"),
+                status=data.get("status", data.get("validation_status", "Testing")),
                 evidence_density=data.get("evidence_density", 0),
                 source_type=data.get("source_type"),
                 source_id=data.get("source_id"),
                 source_snippet=data.get("source_snippet"),
                 confidence_score=data.get("confidence_score", 0),
+                last_tested_at=data.get("last_tested_at", dt.datetime.utcnow()),
+                owner_id=data.get("owner_id"),
             )
             db.add(assumption)
             db.commit()
@@ -971,6 +1063,8 @@ class DbService:
             if not assumption:
                 return
             assumption.validation_status = status
+            assumption.status = status
+            assumption.last_tested_at = dt.datetime.utcnow()
             db.commit()
 
     def touch_assumption(self, assumption_id: int) -> None:
@@ -979,6 +1073,7 @@ class DbService:
             if not assumption:
                 return
             assumption.updated_at = dt.datetime.utcnow()
+            assumption.last_tested_at = dt.datetime.utcnow()
             db.commit()
 
     def update_assumption(self, assumption_id: int, data: dict) -> None:
@@ -992,12 +1087,20 @@ class DbService:
                 assumption.lane = data["lane"]
             if "validation_status" in data:
                 assumption.validation_status = data["validation_status"]
+                assumption.status = data["validation_status"]
+                assumption.last_tested_at = dt.datetime.utcnow()
+            if "status" in data:
+                assumption.status = data["status"]
+                assumption.validation_status = data["status"]
+                assumption.last_tested_at = dt.datetime.utcnow()
             if "evidence_density" in data:
                 assumption.evidence_density = data["evidence_density"]
             if "category" in data:
                 assumption.category = data["category"]
             if "evidence_link" in data:
                 assumption.evidence_link = data["evidence_link"]
+            if "owner_id" in data:
+                assumption.owner_id = data["owner_id"]
             db.commit()
 
     def update_assumption_title(self, assumption_id: int, new_title: str) -> None:
@@ -1044,7 +1147,10 @@ class DbService:
             assumptions = (
                 db.query(Assumption)
                 .options(joinedload(Assumption.project))
-                .filter(Assumption.validation_status == "Testing", Assumption.updated_at < cutoff)
+                .filter(
+                    or_(Assumption.status == "Testing", Assumption.validation_status == "Testing"),
+                    func.coalesce(Assumption.last_tested_at, Assumption.updated_at) < cutoff,
+                )
                 .all()
             )
             results = []
@@ -1108,6 +1214,40 @@ class DbService:
                 results[score.assumption_id].append(score)
             return dict(results)
 
+    def record_decision_vote(
+        self,
+        assumption_id: int,
+        user_id: str,
+        impact: int,
+        uncertainty: int,
+    ) -> None:
+        with SessionLocal() as db:
+            vote = (
+                db.query(DecisionVote)
+                .filter_by(assumption_id=assumption_id, user_id=user_id)
+                .first()
+            )
+            if not vote:
+                vote = DecisionVote(assumption_id=assumption_id, user_id=user_id)
+                db.add(vote)
+            vote.impact = impact
+            vote.uncertainty = uncertainty
+            db.commit()
+
+    def get_decision_vote_summary(self, assumption_id: int) -> Dict[str, float]:
+        with SessionLocal() as db:
+            votes = db.query(DecisionVote).filter(DecisionVote.assumption_id == assumption_id).all()
+            if not votes:
+                return {"count": 0, "avg_impact": 0.0, "avg_uncertainty": 0.0}
+            total_impact = sum(vote.impact or 0 for vote in votes)
+            total_uncertainty = sum(vote.uncertainty or 0 for vote in votes)
+            count = len(votes)
+            return {
+                "count": count,
+                "avg_impact": round(total_impact / count, 2),
+                "avg_uncertainty": round(total_uncertainty / count, 2),
+            }
+
     def _set_active_project(self, db: Session, user_id: str, project_id: int) -> None:
         state = db.query(UserState).filter(UserState.user_id == user_id).first()
         if not state:
@@ -1163,6 +1303,7 @@ class DbService:
         return {
             "id": experiment.id,
             "project_id": experiment.project_id,
+            "assumption_id": experiment.assumption_id,
             "title": experiment.title,
             "hypothesis": experiment.hypothesis,
             "method": experiment.method,
@@ -1172,6 +1313,8 @@ class DbService:
             "primary_kpi": experiment.primary_kpi,
             "target_value": experiment.target_value,
             "current_value": experiment.current_value,
+            "kpi_target": experiment.kpi_target,
+            "kpi_actual": experiment.kpi_actual,
             "dataset_link": experiment.dataset_link,
         }
 
@@ -1183,11 +1326,14 @@ class DbService:
             "evidence_link": assumption.evidence_link,
             "lane": assumption.lane,
             "validation_status": assumption.validation_status,
+            "status": assumption.status,
             "evidence_density": assumption.evidence_density,
             "source_type": assumption.source_type,
             "source_id": assumption.source_id,
             "source_snippet": assumption.source_snippet,
             "confidence_score": assumption.confidence_score,
+            "last_tested_at": assumption.last_tested_at.isoformat() if assumption.last_tested_at else None,
+            "owner_id": assumption.owner_id,
             "updated_at": assumption.updated_at.isoformat() if assumption.updated_at else None,
         }
 
