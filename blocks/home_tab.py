@@ -60,7 +60,7 @@ def _assumption_section(assumption: dict[str, Any]) -> dict[str, Any]:
     last_tested = _parse_datetime(assumption.get("last_tested_at")) or _parse_datetime(assumption.get("updated_at"))
     is_stale = False
     if status == "Testing" and last_tested:
-        is_stale = last_tested < datetime.utcnow() - timedelta(days=_STALE_ASSUMPTION_THRESHOLD_DAYS)
+        is_stale = last_tested < datetime.now(datetime.timezone.utc) - timedelta(days=_STALE_ASSUMPTION_THRESHOLD_DAYS)
     emoji = _status_emoji(status, is_stale)
     confidence = assumption.get("confidence_score", 0)
     owner_id = assumption.get("owner_id")
