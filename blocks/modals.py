@@ -1,3 +1,6 @@
+_MAX_ROADMAP_MODAL_TITLE_LENGTH = 75
+
+
 def _truncate_text(text: str, max_length: int) -> str:
     if len(text) <= max_length:
         return text
@@ -265,7 +268,10 @@ def get_new_project_modal() -> dict:
 def get_roadmap_modal(assumptions: list[dict]) -> dict:
     assumption_options = [
         {
-            "text": {"type": "plain_text", "text": _truncate_text(item.get("title", "Untitled"), 75)},
+            "text": {
+                "type": "plain_text",
+                "text": _truncate_text(item.get("title", "Untitled"), _MAX_ROADMAP_MODAL_TITLE_LENGTH),
+            },
             "value": str(item["id"]),
         }
         for item in assumptions

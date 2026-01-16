@@ -205,10 +205,9 @@ def get_home_view(
     project: dict[str, Any] | None,
     all_projects: list[dict[str, Any]] | None = None,
     plan_suggestion: str | None = None,
-    playbook_service: PlaybookService | None = None,
+    *,
+    playbook_service: PlaybookService,
 ) -> dict[str, Any]:
-    if playbook_service is None:
-        raise ValueError("playbook_service is required for get_home_view")
     blocks: list[dict[str, Any]] = []
     assumptions = project.get("assumptions", []) if project else []
     total_assumptions = len(assumptions)
