@@ -8,6 +8,8 @@ from blocks.ui_manager import UIManager
 
 _OCP_CATEGORIES = ("Opportunity", "Capability", "Progress")
 _MAX_TEXT_LENGTH = 2900
+_MAX_PROJECT_NAME_LENGTH_SLACK_UI = 75
+_STALE_ASSUMPTION_THRESHOLD_DAYS = 30
 
 
 def _truncate(text: str) -> str:
@@ -58,8 +60,7 @@ def _assumption_section(assumption: dict[str, Any]) -> dict[str, Any]:
     last_tested = _parse_datetime(assumption.get("last_tested_at")) or _parse_datetime(assumption.get("updated_at"))
     is_stale = False
     if status == "Testing" and last_tested:
-if status == "Testing" and last_tested:
-    is_stale = last_tested < datetime.utcnow() - timedelta(days=_STALE_ASSUMPTION_THRESHOLD_DAYS)
+        is_stale = last_tested < datetime.now(datetime.timezone.utc) - timedelta(days=_STALE_ASSUMPTION_THRESHOLD_DAYS)
     emoji = _status_emoji(status, is_stale)
     confidence = assumption.get("confidence_score", 0)
     owner_id = assumption.get("owner_id")
@@ -86,7 +87,6 @@ if status == "Testing" and last_tested:
                 {
                     "text": {"type": "plain_text", "text": "Design Test"},
                     "value": f"{assumption['id']}:design_assumption_experiment",
-                }
                 },
             ],
         },
@@ -153,7 +153,10 @@ def get_home_view(
         all_projects = [*all_projects, {"name": project["name"], "id": project["id"]}]
     if all_projects:
         project_options = [
-_MAX_PROJECT_NAME_LENGTH_SLACK_UI = 75
+            {
+                "text": {"type": "plain_text", "text": (item["name"][:_MAX_PROJECT_NAME_LENGTH_SLACK_UI - 3] + "...") if len(item["name"]) > _MAX_PROJECT_NAME_LENGTH_SLACK_UI else item["name"]},
+                "value": str(item["id"]),
+            }
             for item in all_projects
         ]
         initial_option = next(
