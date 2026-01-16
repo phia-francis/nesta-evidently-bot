@@ -89,6 +89,8 @@ logger = logging.getLogger(__name__)
 MAX_ASANA_PAYLOAD_ITEM_LENGTH = 100
 CHANNEL_PREFIX = "evidently-"
 ADMIN_USER_ID = os.environ.get("ADMIN_USER")
+UNCERTAINTY_HORIZON_NOW_THRESHOLD = 4
+UNCERTAINTY_HORIZON_LATER_THRESHOLD = 2
 
 ConfigManager().validate()
 
@@ -537,7 +539,13 @@ def publish_home_tab(
 ) -> None:
     project_data = db_service.get_active_project(user_id)
     all_projects = db_service.get_user_projects(user_id)
-    view = get_home_view(user_id, project_data, all_projects, plan_suggestion=plan_suggestion)
+    view = get_home_view(
+        user_id,
+        project_data,
+        all_projects,
+        plan_suggestion=plan_suggestion,
+        playbook_service=playbook,
+    )
     client.views_publish(user_id=user_id, view=view)
 
 
@@ -587,7 +595,13 @@ def publish_home_tab_async(
 ) -> None:
     project_data = db_service.get_active_project(user_id)
     all_projects = db_service.get_user_projects(user_id)
-    view = get_home_view(user_id, project_data, all_projects, plan_suggestion=plan_suggestion)
+    view = get_home_view(
+        user_id,
+        project_data,
+        all_projects,
+        plan_suggestion=plan_suggestion,
+        playbook_service=playbook,
+    )
     client.views_publish(user_id=user_id, view=view)
 
     if not project_data:
@@ -595,7 +609,13 @@ def publish_home_tab_async(
 
     def update_actions() -> None:
         try:
-            refreshed_view = get_home_view(user_id, project_data, all_projects, plan_suggestion=plan_suggestion)
+            refreshed_view = get_home_view(
+                user_id,
+                project_data,
+                all_projects,
+                plan_suggestion=plan_suggestion,
+                playbook_service=playbook,
+            )
             client.views_publish(user_id=user_id, view=refreshed_view)
         except Exception:
             logger.exception("Failed to generate and publish next best actions for user %s", user_id)
@@ -691,7 +711,7 @@ def autofill_diagnostic(ack, body, client, logger):  # noqa: ANN001
     if not view_id or not project_id:
         return
     try:
-        context_text = ingestion_service.get_project_context(int(project_id))
+        context_text = ingestion_service.ingest_project_files(int(project_id))
         ocp_questions = playbook.get_ocp_questions()
         if not context_text:
             client.views_update(
@@ -1345,13 +1365,24 @@ def handle_link_project(ack, body, respond, client, logger):  # noqa: ANN001
         if not project_name:
             respond("Usage: `/evidently-link project name`")
             return
-        project_id = db_service.find_project_by_fuzzy_name(project_name)
-        if not project_id:
-            respond(f"Could not find a project named '{project_name}'.")
+        user_projects = db_service.get_user_projects(body["user_id"])
+        normalized_name = project_name.lower()
+        project = next(
+            (item for item in user_projects if item.get("name", "").lower() == normalized_name),
+            None,
+        )
+        if not project:
+            project = next(
+                (item for item in user_projects if normalized_name in item.get("name", "").lower()),
+                None,
+            )
+        if not project:
+            respond("Could not find a project with that name in your projects.")
             return
+        project_id = project["id"]
         db_service.update_project(project_id, {"channel_id": body["channel_id"]})
         db_service.set_active_project(body["user_id"], project_id)
-        respond(f"✅ Linked this channel to project {project_name}.")
+        respond(f"✅ Linked this channel to project {project['name']}.")
         publish_home_tab_async(client, body["user_id"])
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to link project via command", exc_info=True)
@@ -4260,9 +4291,9 @@ def submit_decision_vote(ack, body, view, client, logger):  # noqa: ANN001
             uncertainty_score=uncertainty,
         )
         summary = decision_service.reveal_results(assumption_id)
-        if summary.get("avg_uncertainty", 0) >= 4:
+        if summary.get("avg_uncertainty", 0) >= UNCERTAINTY_HORIZON_NOW_THRESHOLD:
             db_service.update_assumption_horizon(assumption_id, "now")
-        elif summary.get("avg_uncertainty", 0) <= 2:
+        elif summary.get("avg_uncertainty", 0) <= UNCERTAINTY_HORIZON_LATER_THRESHOLD:
             db_service.update_assumption_horizon(assumption_id, "later")
         heatmap = decision_heatmap_label(summary["avg_impact"], summary["avg_uncertainty"])
         client.chat_postMessage(
@@ -4605,4 +4636,13 @@ if Config.BACKUP_ENABLED:
     )
     backup_scheduler.start()
 
-daily_dashboard_scheduler = start_scheduler(app.client, db_service, get_home_view)
+daily_dashboard_scheduler = start_scheduler(
+    app.client,
+    db_service,
+    lambda user_id, project, all_projects: get_home_view(
+        user_id,
+        project,
+        all_projects,
+        playbook_service=playbook,
+    ),
+)
