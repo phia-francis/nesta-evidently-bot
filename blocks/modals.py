@@ -129,6 +129,191 @@ def open_log_assumption_modal(ai_data: dict | None = None) -> dict:
     }
 
 
+def get_diagnostic_modal(
+    ocp_questions: dict[str, dict[str, str]],
+    project_id: int,
+    ai_data: dict[str, dict[str, object]] | None = None,
+    status_message: str | None = None,
+) -> dict:
+    options = [{"text": {"type": "plain_text", "text": str(i)}, "value": str(i)} for i in range(1, 6)]
+
+    ai_data = ai_data or {}
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Rate confidence (1 = low, 5 = high) for each OCP diagnostic question.",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "✨ Auto-Fill with AI"},
+                    "action_id": "autofill_diagnostic",
+                    "value": str(project_id),
+                }
+            ],
+        },
+        {"type": "divider"},
+    ]
+    if status_message:
+        blocks.insert(
+            1,
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": status_message}],
+            },
+        )
+
+    for category, questions in ocp_questions.items():
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*{category}*"},
+            }
+        )
+        for key, question in questions.items():
+            ai_key = f"{category.lower()}_{key.lower()}"
+            ai_answer = ai_data.get(ai_key, {})
+            initial_answer = str(ai_answer.get("answer", "")) if ai_answer else ""
+            initial_confidence = str(ai_answer.get("confidence", "")) if ai_answer else ""
+            initial_option = next((option for option in options if option["value"] == initial_confidence), None)
+            blocks.append(
+                {
+                    "type": "input",
+                    "block_id": f"ocp_answer__{category.lower()}__{key.lower()}",
+                    "label": {"type": "plain_text", "text": question},
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "answer",
+                        "multiline": True,
+                        "initial_value": initial_answer,
+                    },
+                }
+            )
+            blocks.append(
+                {
+                    "type": "input",
+                    "block_id": f"ocp_confidence__{category.lower()}__{key.lower()}",
+                    "label": {"type": "plain_text", "text": "Confidence (1-5)"},
+                    "element": {
+                        "type": "static_select",
+                        "action_id": "confidence_score",
+                        "options": options,
+                        "initial_option": initial_option,
+                    },
+                }
+            )
+        blocks.append({"type": "divider"})
+
+    return {
+        "type": "modal",
+        "callback_id": "action_save_diagnostic",
+        "private_metadata": str(project_id),
+        "title": {"type": "plain_text", "text": "Run Diagnostic"},
+        "submit": {"type": "plain_text", "text": "Save"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": blocks,
+    }
+
+
+def get_new_project_modal() -> dict:
+    stage_options = [
+        {"text": {"type": "plain_text", "text": "Audit"}, "value": "audit"},
+        {"text": {"type": "plain_text", "text": "Plan"}, "value": "plan"},
+        {"text": {"type": "plain_text", "text": "Action"}, "value": "action"},
+    ]
+    return {
+        "type": "modal",
+        "callback_id": "new_project_submit",
+        "title": {"type": "plain_text", "text": "New Project"},
+        "submit": {"type": "plain_text", "text": "Create"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "project_name",
+                "label": {"type": "plain_text", "text": "Project Name"},
+                "element": {"type": "plain_text_input", "action_id": "value"},
+            },
+            {
+                "type": "input",
+                "block_id": "project_description",
+                "label": {"type": "plain_text", "text": "Description"},
+                "element": {"type": "plain_text_input", "action_id": "value", "multiline": True},
+            },
+            {
+                "type": "input",
+                "block_id": "project_flow_stage",
+                "label": {"type": "plain_text", "text": "Initial Stage"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "value",
+                    "options": stage_options,
+                    "initial_option": stage_options[0],
+                },
+            },
+        ],
+    }
+
+
+def get_roadmap_modal(assumptions: list[dict]) -> dict:
+    def _truncate(text: str) -> str:
+        if len(text) <= 75:
+            return text
+        return text[:72] + "..."
+
+    assumption_options = [
+        {
+            "text": {"type": "plain_text", "text": _truncate(item.get("title", "Untitled"))},
+            "value": str(item["id"]),
+        }
+        for item in assumptions
+    ]
+    horizon_options = [
+        {"text": {"type": "plain_text", "text": "Now"}, "value": "now"},
+        {"text": {"type": "plain_text", "text": "Next"}, "value": "next"},
+        {"text": {"type": "plain_text", "text": "Later"}, "value": "later"},
+    ]
+    initial_assumption = assumption_options[0] if assumption_options else None
+    initial_horizon = horizon_options[0]
+
+    return {
+        "type": "modal",
+        "callback_id": "save_roadmap_horizon",
+        "title": {"type": "plain_text", "text": "Update Roadmap"},
+        "submit": {"type": "plain_text", "text": "Save"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "roadmap_assumption_select",
+                "label": {"type": "plain_text", "text": "Select assumption"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "assumption_id",
+                    "options": assumption_options,
+                    "initial_option": initial_assumption,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "roadmap_horizon_select",
+                "label": {"type": "plain_text", "text": "Move to horizon"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "horizon",
+                    "options": horizon_options,
+                    "initial_option": initial_horizon,
+                },
+            },
+        ],
+    }
+
+
 def decision_room_modal() -> dict:
     """Modal for consensus scoring in the Decision Room."""
     options = [{"text": {"type": "plain_text", "text": str(i)}, "value": str(i)} for i in range(1, 6)]

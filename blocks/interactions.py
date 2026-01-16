@@ -71,6 +71,23 @@ def get_ai_summary_block(analysis: dict) -> list:
                 }
             )
 
+    ocp_answers = analysis.get("ocp_answers") or {}
+    if ocp_answers:
+        blocks.append({"type": "divider"})
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "*OCP Question Mapping*"}})
+        for key, details in ocp_answers.items():
+            answer = details.get("answer", "No answer provided.")
+            confidence = details.get("confidence", "—")
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"*{key.replace('_', ' ').title()}*\n{answer}\nConfidence: {confidence}/5",
+                    },
+                }
+            )
+
     blocks.append(
         {
             "type": "context",

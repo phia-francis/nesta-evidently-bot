@@ -197,6 +197,125 @@ Playbook Reference:
             logger.error("AI Analysis - General failure", exc_info=True)
             return {"error": f"Could not analyse thread: {exc}"}
 
+    def analyze_for_ocp(self, context_text: str) -> dict:
+        if not context_text:
+            return {"error": "Missing project context."}
+        prompt = """
+You are an Innovation Assistant. Read the project context.
+Fill out the OCP Framework questions (Opportunity, Capability, Progress).
+For each answer, estimate a 'Confidence Score' (1-5) based on evidence quality.
+Return JSON: { "opportunity_needs": {"answer": "...", "confidence": 3}, ... }
+"""
+        try:
+            response = self.model.generate_content(
+                f"{prompt}\nProject context:\n{self._wrap_user_input(self.redact_pii(context_text))}",
+                generation_config={"temperature": _TEMPERATURE},
+            )
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn only valid JSON. No markdown or commentary.",
+            )
+            return parsed if isinstance(parsed, dict) else {"error": "Invalid AI response."}
+        except json.JSONDecodeError as exc:
+            logger.error("AI OCP Analysis - Failed to parse JSON", exc_info=True)
+            return {"error": f"Could not analyse OCP context: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("AI OCP Analysis - General failure", exc_info=True)
+            return {"error": f"Could not analyse OCP context: {exc}"}
+
+    def suggest_roadmap_horizon(self, assumption_text: str) -> dict:
+        if not assumption_text:
+            return {"error": "Missing assumption text."}
+        prompt = """
+You are an Innovation Assistant.
+Classify the assumption into a roadmap horizon:
+- now: high uncertainty or existential risk
+- next: growth validation
+- later: optimization or system-level improvements
+Return JSON: { "horizon": "now|next|later", "reason": "short explanation" }
+"""
+        try:
+            response = self.model.generate_content(
+                f"{prompt}\nAssumption:\n{self._wrap_user_input(self.redact_pii(assumption_text))}",
+                generation_config={"temperature": _TEMPERATURE},
+            )
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn only valid JSON. No markdown or commentary.",
+            )
+            return parsed if isinstance(parsed, dict) else {"error": "Invalid AI response."}
+        except json.JSONDecodeError as exc:
+            logger.error("AI Roadmap Suggestion - Failed to parse JSON", exc_info=True)
+            return {"error": f"Could not suggest roadmap horizon: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("AI Roadmap Suggestion - General failure", exc_info=True)
+            return {"error": f"Could not suggest roadmap horizon: {exc}"}
+
+    def recommend_playbook_method(self, phase: str, assumption_text: str, method_catalog: dict) -> dict:
+        if not assumption_text or not method_catalog:
+            return {"error": "Missing inputs."}
+        method_list = "\n".join(
+            f"- {method_id}: {method_data.get('name')}"
+            for method_id, method_data in method_catalog.items()
+        )
+        prompt = f"""
+You are an Innovation Assistant.
+Pick the best Test & Learn method for the assumption in the phase: {phase}.
+Choose from this list only:
+{method_list}
+Return JSON: {{"method_id": "string", "reason": "short explanation"}}
+"""
+        try:
+            response = self.model.generate_content(
+                f"{prompt}\nAssumption:\n{self._wrap_user_input(self.redact_pii(assumption_text))}",
+                generation_config={"temperature": _TEMPERATURE},
+            )
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn only valid JSON. No markdown or commentary.",
+            )
+            return parsed if isinstance(parsed, dict) else {"error": "Invalid AI response."}
+        except json.JSONDecodeError as exc:
+            logger.error("AI Method Suggestion - Failed to parse JSON", exc_info=True)
+            return {"error": f"Could not suggest method: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("AI Method Suggestion - General failure", exc_info=True)
+            return {"error": f"Could not suggest method: {exc}"}
+
+    def generate_meeting_agenda(self, flow_stage: str, project_name: str) -> str:
+        focus = {
+            "audit": "Validating our confidence scores.",
+            "plan": "Prioritizing the 'NOW' column.",
+            "action": "Reviewing the latest experiment results.",
+        }.get(flow_stage, "Reviewing project updates.")
+        prompt = f"""
+You are an Innovation Assistant.
+Create a concise meeting agenda for the project "{project_name}".
+Focus: {focus}
+Return a short bullet list agenda.
+"""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            return response.text.strip()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to generate meeting agenda")
+            return f"- Welcome & goals\n- {focus}\n- Next steps"
+
+    def generate_executive_summary(self, project_name: str, context: str) -> str:
+        prompt = f"""
+You are an Innovation Assistant.
+Write a concise executive summary (3-4 sentences) for the strategy report.
+Project: {project_name}
+Context:
+{self._wrap_user_input(self.redact_pii(context))}
+"""
+        try:
+            response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})
+            return response.text.strip()
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to generate executive summary")
+            return "Executive summary unavailable. Please review the sections below."
+
     def suggest_experiments(self, assumption_text: str) -> list[str]:
         """Suggest three low-fidelity experiments for a given assumption."""
         if not assumption_text:
@@ -419,12 +538,13 @@ Return JSON only with keys: "competitors" (list of strings), "risks" (list of st
         Returns:
             A concise summary string.
         """
+        joined_messages = "\n".join(messages[:20])
         prompt = f"""
 You are Evidently. Summarize the last 20 messages into a short project context update.
 Return plain text only.
 
 Conversation:
-{self._wrap_user_input(self.redact_pii("\n".join(messages[:20])))}
+{self._wrap_user_input(self.redact_pii(joined_messages))}
 """
         try:
             response = self.model.generate_content(prompt, generation_config={"temperature": _TEMPERATURE})

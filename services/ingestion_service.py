@@ -112,6 +112,9 @@ class IngestionService:
     def ingest_project_files(self, project_id: int) -> str:
         return self.process_drive_files(project_id)
 
+    def get_project_context(self, project_id: int) -> str:
+        return self.process_drive_files(project_id)
+
     def extract_text_payload(self, file_content: bytes, file_type: str) -> dict:
         """Extract and chunk text for downstream ingestion.
 

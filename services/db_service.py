@@ -47,6 +47,29 @@ ASSUMPTION_STATUS_ENUM = Enum(
     name="assumption_status",
     native_enum=False,
 )
+PROJECT_FLOW_STAGE_ENUM = Enum(
+    "audit",
+    "plan",
+    "action",
+    name="project_flow_stage",
+    native_enum=False,
+)
+ASSUMPTION_HORIZON_ENUM = Enum(
+    "now",
+    "next",
+    "later",
+    name="assumption_horizon",
+    native_enum=False,
+)
+TEST_AND_LEARN_PHASE_ENUM = Enum(
+    "define",
+    "shape",
+    "develop",
+    "test",
+    "diffuse",
+    name="test_and_learn_phase",
+    native_enum=False,
+)
 
 
 def _build_engine() -> Engine:
@@ -76,6 +99,7 @@ class Project(Base):
     context_summary = Column(Text, nullable=True)
     status = Column(String(50), default="active")
     stage = Column(String(50), default="Define")
+    flow_stage = Column(PROJECT_FLOW_STAGE_ENUM, default="audit")
     channel_id = Column(String(50))
     created_by = Column(String(50))
     created_at = Column(DateTime, default=dt.datetime.utcnow)
@@ -186,13 +210,15 @@ class Assumption(Base):
     category = Column(ASSUMPTION_CATEGORY_ENUM, default="Opportunity")
     evidence_link = Column(Text)
     lane = Column(String(50), default="Now")
+    horizon = Column(ASSUMPTION_HORIZON_ENUM, default="now")
     validation_status = Column(String(50), default="Testing")
     status = Column(ASSUMPTION_STATUS_ENUM, default="Testing")
     evidence_density = Column(Integer, default=0)
     source_type = Column(String(50))
     source_id = Column(String(255))
     source_snippet = Column(Text)
-    confidence_score = Column(Integer, default=0)
+    confidence_score = Column(Integer, default=3)
+    test_and_learn_phase = Column(TEST_AND_LEARN_PHASE_ENUM, default="define")
     last_tested_at = Column(DateTime, default=dt.datetime.utcnow)
     owner_id = Column(String(50))
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
@@ -320,6 +346,7 @@ class DbService:
         expected_tables = {
             "projects": {
                 "stage",
+                "flow_stage",
                 "integrations",
                 "channel_id",
                 "mission",
@@ -336,11 +363,13 @@ class DbService:
                 "source_type",
                 "source_id",
                 "confidence_score",
+                "test_and_learn_phase",
                 "last_tested_at",
                 "owner_id",
                 "updated_at",
                 "category",
                 "evidence_link",
+                "horizon",
             },
             "canvas_items": {"section", "text", "ai_generated"},
             "experiments": {"outcome", "assumption_id", "kpi_target", "kpi_actual"},
@@ -373,6 +402,7 @@ class DbService:
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS mission TEXT;"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS channel_id VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS stage VARCHAR(50) DEFAULT 'Define';"))
+                    connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS flow_stage VARCHAR(50) DEFAULT 'audit';"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS integrations JSON DEFAULT '{}';"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS context_summary TEXT;"))
                     connection.execute(text("ALTER TABLE projects ADD COLUMN IF NOT EXISTS google_access_token TEXT;"))
@@ -387,12 +417,14 @@ class DbService:
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_type VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_id VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_snippet TEXT;"))
-                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 0;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 3;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS test_and_learn_phase VARCHAR(50) DEFAULT 'define';"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMP;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS owner_id VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'Opportunity';"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_link TEXT;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS horizon VARCHAR(50) DEFAULT 'now';"))
 
                     # --- 3. Fix EXPERIMENTS Table (Prevent future crashes) ---
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS hypothesis TEXT;"))
@@ -441,6 +473,7 @@ class DbService:
         progress: str | None = None,
         mission: str | None = None,
         stage: str = "Define",
+        flow_stage: str = "audit",
         channel_id: str | None = None,
         add_starter_kit: bool = True,
     ) -> Project:
@@ -453,6 +486,7 @@ class DbService:
                 description=formatted_description or "",
                 mission=mission,
                 stage=stage,
+                flow_stage=flow_stage,
                 created_by=user_id,
                 channel_id=channel_id,
             )
@@ -467,10 +501,12 @@ class DbService:
                     project_id=project.id,
                     title="We can reach the target audience through community partners.",
                     lane="Now",
+                    horizon="now",
                     validation_status="Testing",
                     status="Testing",
                     evidence_density=1,
-                    confidence_score=40,
+                    confidence_score=3,
+                    test_and_learn_phase="define",
                 )
                 experiment = Experiment(
                     project_id=project.id,
@@ -592,6 +628,7 @@ class DbService:
             "description",
             "mission",
             "stage",
+            "flow_stage",
             "channel_id",
             "status",
             "context_summary",
@@ -968,6 +1005,7 @@ class DbService:
         title: str | None = None,
         method: str | None = None,
         hypothesis: str | None = None,
+        assumption_id: int | None = None,
         data: dict | None = None,
     ) -> Experiment:
         data = data or {}
@@ -977,6 +1015,8 @@ class DbService:
             data["method"] = method
         if hypothesis is not None:
             data["hypothesis"] = hypothesis
+        if assumption_id is not None:
+            data["assumption_id"] = assumption_id
         data.setdefault("stage", "Develop")
         data.setdefault("status", "Planning")
         data.setdefault("outcome", "Pending")
@@ -1050,19 +1090,23 @@ class DbService:
 
     def create_assumption(self, project_id: int, data: dict) -> Assumption:
         with SessionLocal() as db:
+            lane_value = data.get("lane", "Now")
+            horizon_value = data.get("horizon") or lane_value.lower()
             assumption = Assumption(
                 project_id=project_id,
                 title=data.get("title"),
                 category=data.get("category", "Opportunity"),
                 evidence_link=data.get("evidence_link"),
-                lane=data.get("lane", "Now"),
+                lane=lane_value,
                 validation_status=data.get("validation_status", "Testing"),
                 status=data.get("status", data.get("validation_status", "Testing")),
                 evidence_density=data.get("evidence_density", 0),
                 source_type=data.get("source_type"),
                 source_id=data.get("source_id"),
                 source_snippet=data.get("source_snippet"),
-                confidence_score=data.get("confidence_score", 0),
+                confidence_score=data.get("confidence_score", 3),
+                horizon=horizon_value if horizon_value in {"now", "next", "later"} else "now",
+                test_and_learn_phase=data.get("test_and_learn_phase", "define"),
                 last_tested_at=data.get("last_tested_at", dt.datetime.utcnow()),
                 owner_id=data.get("owner_id"),
             )
@@ -1145,9 +1189,71 @@ class DbService:
                 assumption.category = data["category"]
             if "evidence_link" in data:
                 assumption.evidence_link = data["evidence_link"]
+            if "confidence_score" in data:
+                assumption.confidence_score = data["confidence_score"]
+            if "horizon" in data:
+                assumption.horizon = data["horizon"]
+            if "test_and_learn_phase" in data:
+                assumption.test_and_learn_phase = data["test_and_learn_phase"]
             if "owner_id" in data:
                 assumption.owner_id = data["owner_id"]
             db.commit()
+
+    def update_project_flow_stage(self, project_id: int, flow_stage: str) -> None:
+        with SessionLocal() as db:
+            project = db.query(Project).filter(Project.id == project_id).first()
+            if not project:
+                return
+            project.flow_stage = flow_stage
+            db.commit()
+
+    def update_assumption_confidence_score(self, assumption_id: int, confidence_score: int) -> None:
+        self.update_assumption(assumption_id, {"confidence_score": confidence_score})
+
+    def update_assumption_horizon(self, assumption_id: int, horizon: str) -> None:
+        self.update_assumption(assumption_id, {"horizon": horizon})
+
+    def update_assumption_test_and_learn_phase(self, assumption_id: int, phase: str) -> None:
+        self.update_assumption(assumption_id, {"test_and_learn_phase": phase})
+
+    def upsert_diagnostic_assumption(
+        self,
+        project_id: int,
+        category: str,
+        question: str,
+        confidence_score: int,
+        answer: str | None = None,
+    ) -> Assumption:
+        with SessionLocal() as db:
+            assumption = (
+                db.query(Assumption)
+                .filter(
+                    Assumption.project_id == project_id,
+                    Assumption.title == question,
+                    Assumption.category == category,
+                )
+                .first()
+            )
+            if not assumption:
+                assumption = Assumption(
+                    project_id=project_id,
+                    title=question,
+                    category=category,
+                    validation_status="Testing",
+                    status="Testing",
+                    confidence_score=confidence_score,
+                    horizon="now",
+                    test_and_learn_phase="define",
+                    source_snippet=answer or None,
+                )
+                db.add(assumption)
+            else:
+                assumption.confidence_score = confidence_score
+                if answer is not None:
+                    assumption.source_snippet = answer
+            db.commit()
+            db.refresh(assumption)
+            return assumption
 
     def update_assumption_title(self, assumption_id: int, new_title: str) -> None:
         self.update_assumption(assumption_id, {"title": new_title})
@@ -1309,6 +1415,7 @@ class DbService:
             "context_summary": project.context_summary,
             "status": project.status,
             "stage": project.stage,
+            "flow_stage": project.flow_stage,
             "channel_id": project.channel_id,
             "created_by": project.created_by,
             "dashboard_message_ts": project.dashboard_message_ts,
@@ -1370,6 +1477,7 @@ class DbService:
             "category": assumption.category,
             "evidence_link": assumption.evidence_link,
             "lane": assumption.lane,
+            "horizon": assumption.horizon,
             "validation_status": assumption.validation_status,
             "status": assumption.status,
             "evidence_density": assumption.evidence_density,
@@ -1377,6 +1485,7 @@ class DbService:
             "source_id": assumption.source_id,
             "source_snippet": assumption.source_snippet,
             "confidence_score": assumption.confidence_score,
+            "test_and_learn_phase": assumption.test_and_learn_phase,
             "last_tested_at": assumption.last_tested_at.isoformat() if assumption.last_tested_at else None,
             "owner_id": assumption.owner_id,
             "updated_at": assumption.updated_at.isoformat() if assumption.updated_at else None,
