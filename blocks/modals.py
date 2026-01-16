@@ -1,3 +1,9 @@
+def _truncate_text(text: str, max_length: int) -> str:
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + "..."
+
+
 def experiment_modal(assumption_text: str, suggestions: str) -> dict:
     """Build a modal for experiment suggestions."""
     return {
@@ -20,10 +26,6 @@ def experiment_modal(assumption_text: str, suggestions: str) -> dict:
 
 def open_log_assumption_modal(ai_data: dict | None = None) -> dict:
     ai_data = ai_data or {}
-    def _truncate(text: str) -> str:
-        if len(text) <= 2900:
-            return text
-        return text[:2897] + "..."
     category_options = [
         {"text": {"type": "plain_text", "text": "Opportunity"}, "value": "Opportunity"},
         {"text": {"type": "plain_text", "text": "Capability"}, "value": "Capability"},
@@ -75,7 +77,7 @@ def open_log_assumption_modal(ai_data: dict | None = None) -> dict:
                 "element": {
                     "type": "plain_text_input",
                     "action_id": "title_input",
-                    "initial_value": _truncate(ai_data.get("text", "")),
+                    "initial_value": _truncate_text(ai_data.get("text", ""), 2900),
                 },
             },
             {
@@ -261,14 +263,9 @@ def get_new_project_modal() -> dict:
 
 
 def get_roadmap_modal(assumptions: list[dict]) -> dict:
-    def _truncate(text: str) -> str:
-        if len(text) <= 75:
-            return text
-        return text[:72] + "..."
-
     assumption_options = [
         {
-            "text": {"type": "plain_text", "text": _truncate(item.get("title", "Untitled"))},
+            "text": {"type": "plain_text", "text": _truncate_text(item.get("title", "Untitled"), 75)},
             "value": str(item["id"]),
         }
         for item in assumptions

@@ -18,8 +18,6 @@ _MAX_PROJECT_NAME_LENGTH_SLACK_UI = 75
 _STALE_ASSUMPTION_THRESHOLD_DAYS = 30
 _LOW_CONFIDENCE_THRESHOLD = 3
 
-_playbook = PlaybookService()
-
 
 def _truncate(text: str) -> str:
     if len(text) <= _MAX_TEXT_LENGTH:
@@ -207,7 +205,10 @@ def get_home_view(
     project: dict[str, Any] | None,
     all_projects: list[dict[str, Any]] | None = None,
     plan_suggestion: str | None = None,
+    playbook_service: PlaybookService | None = None,
 ) -> dict[str, Any]:
+    if playbook_service is None:
+        raise ValueError("playbook_service is required for get_home_view")
     blocks: list[dict[str, Any]] = []
     assumptions = project.get("assumptions", []) if project else []
     total_assumptions = len(assumptions)
@@ -400,7 +401,7 @@ def get_home_view(
             horizon = _normalise_horizon(assumption.get("horizon") or assumption.get("lane"))
             assumptions_by_horizon.setdefault(horizon, []).append(assumption)
 
-        for horizon in _playbook.get_roadmap_horizons():
+        for horizon in playbook_service.get_roadmap_horizons():
             horizon_key = horizon["key"]
             horizon_label = horizon["label"]
             horizon_hint = horizon["description"]
@@ -428,13 +429,17 @@ def get_home_view(
 
     else:
         current_phase_key = _get_current_phase(assumptions)
-        phase = _playbook.get_phase_details(current_phase_key)
+        phase = playbook_service.get_phase_details(current_phase_key)
         activities = phase.get("activities", [])
         activities_text = (
             "\n".join(f"• {activity}" for activity in activities) if activities else "• Activities coming soon."
         )
         phase_index = next(
-            (index for index, item in enumerate(_playbook.get_test_and_learn_phases(), start=1) if item["key"] == current_phase_key),
+            (
+                index
+                for index, item in enumerate(playbook_service.get_test_and_learn_phases(), start=1)
+                if item["key"] == current_phase_key
+            ),
             1,
         )
 
