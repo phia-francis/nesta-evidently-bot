@@ -865,11 +865,12 @@ def export_strategy_doc(ack, body, client, logger):  # noqa: ANN001
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please select a project first.")
         return
+    report_path = None
     try:
         report_path = report_service.generate_strategy_doc(project)
         channel_id = project.get("channel_id") or user_id
-        client.files_upload(
-            channels=channel_id,
+        client.files_upload_v2(
+            channel=channel_id,
             title=f"Strategy Report · {project.get('name', 'Project')}",
             filename=f"strategy-report-{project.get('id', 'project')}.md",
             file=str(report_path),
@@ -877,6 +878,9 @@ def export_strategy_doc(ack, body, client, logger):  # noqa: ANN001
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to export strategy doc", exc_info=True)
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Unable to export the strategy doc right now.")
+    finally:
+        if report_path and report_path.exists():
+            report_path.unlink()
 
 
 @app.action(re.compile(r"^(nav|tab)_"))
