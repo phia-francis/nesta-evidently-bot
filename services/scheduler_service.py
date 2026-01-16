@@ -107,10 +107,6 @@ def check_stale_assumptions(
     client: "WebClient",
     db_service: "DbService",
 ) -> None:
-def check_stale_assumptions(
-    client: "WebClient",
-    db_service: "DbService",
-) -> None:
 
     stale_assumptions = db_service.get_stale_assumptions()
     if not stale_assumptions:
@@ -125,9 +121,14 @@ def check_stale_assumptions(
         try:
             response = client.conversations_open(users=owner_id)
             channel_id = response["channel"]["id"]
+            flow_stage = project.get("flow_stage", "audit")
+            if flow_stage == "action":
+                message_text = "You haven't updated this experiment in 14 days. The Playbook recommends a Speed Test."
+            else:
+                message_text = "Stale assumption check-in"
             client.chat_postMessage(
                 channel=channel_id,
-                text="Stale assumption check-in",
+                text=message_text,
                 blocks=get_nudge_block(
                     {
                         "id": assumption["id"],

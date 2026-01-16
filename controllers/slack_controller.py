@@ -52,7 +52,10 @@ from blocks.modals import (
     create_channel_modal,
     experiment_modal,
     extract_insights_modal,
+    get_diagnostic_modal,
     get_loading_modal,
+    get_new_project_modal,
+    get_roadmap_modal,
     invite_member_modal,
     link_channel_modal,
     open_log_assumption_modal,
@@ -74,6 +77,7 @@ from services.integration_service import IntegrationService
 from services.ingestion_service import IngestionService
 from services.messenger_service import MessengerService
 from services.playbook_service import PlaybookService
+from services.report_service import ReportService
 from services.sync_service import TwoWaySyncService
 from services.scheduler_service import start_scheduler
 from services.toolkit_service import ToolkitService
@@ -101,6 +105,7 @@ sync_service = TwoWaySyncService()
 messenger_service = MessengerService(app.client)
 backup_service = BackupService()
 google_service = GoogleService()
+report_service = ReportService(ai_service, db_service)
 try:
     google_workspace_service = GoogleWorkspaceService()
 except Exception:  # noqa: BLE001
@@ -389,6 +394,10 @@ def run_thread_analysis(client, channel_id: str, thread_ts: str, logger):  # noq
             if project:
                 context_summary = ai_service.summarize_thread([m.get("text", "") for m in messages if m.get("text")])
                 db_service.update_project_context(project["id"], context_summary)
+                if project.get("flow_stage") == "audit":
+                    ocp_answers = ai_service.analyze_for_ocp(full_text)
+                    if not ocp_answers.get("error"):
+                        analysis["ocp_answers"] = ocp_answers
 
             client.chat_update(
                 channel=channel_id,
@@ -478,11 +487,21 @@ def apply_channel_template(client, channel_id: str, tabs: list[str]) -> None:
 
 
 # --- 1. HOME TAB (OCP Dashboard) ---
+def _set_active_project_from_channel(user_id: str, event: dict) -> None:
+    channel_id = event.get("channel") or event.get("channel_id") or event.get("view", {}).get("channel_id")
+    if not channel_id:
+        return
+    project = db_service.get_project_by_channel(channel_id)
+    if project:
+        db_service.set_active_project(user_id, project["id"])
+
+
 @app.event("app_home_opened")
 def update_home_tab(client, event, logger):  # noqa: ANN001
     try:
         user_id = event["user"]
-        publish_home_tab_hub(client, user_id)
+        _set_active_project_from_channel(user_id, event)
+        publish_home_tab_async(client, user_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Error publishing home tab: %s", exc, exc_info=True)
 
@@ -490,7 +509,8 @@ def update_home_tab(client, event, logger):  # noqa: ANN001
 def app_home_opened(client, event, logger):  # noqa: ANN001
     try:
         user_id = event["user"]
-        publish_home_tab_hub(client, user_id)
+        _set_active_project_from_channel(user_id, event)
+        publish_home_tab_async(client, user_id)
     except Exception as exc:  # noqa: BLE001
         if logger:
             logger.error("Error publishing home tab: %s", exc, exc_info=True)
@@ -513,12 +533,11 @@ def publish_home_tab(
     user_id: str,
     active_tab: str = "overview",
     experiment_page: int = 0,
+    plan_suggestion: str | None = None,
 ) -> None:
     project_data = db_service.get_active_project(user_id)
-    all_projects = None
-    if project_data:
-        all_projects = db_service.get_user_projects(user_id)
-    view = get_home_view(user_id, project_data, all_projects)
+    all_projects = db_service.get_user_projects(user_id)
+    view = get_home_view(user_id, project_data, all_projects, plan_suggestion=plan_suggestion)
     client.views_publish(user_id=user_id, view=view)
 
 
@@ -526,6 +545,24 @@ def publish_home_tab_hub(client, user_id: str) -> None:
     projects = db_service.get_user_projects(user_id)
     view = UIManager.render_project_hub(projects, user_id, ADMIN_USER_ID)
     client.views_publish(user_id=user_id, view=view)
+
+
+def _send_new_project_tour(client, user_id: str, project: dict) -> None:  # noqa: ANN001
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text=f"👋 Welcome! I've set your project to Stage 1: {project.get('flow_stage', 'audit').title()}.",
+    )
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text="🎯 Goal: Answer the OCP questions to find your gaps.",
+    )
+    client.chat_postEphemeral(
+        channel=user_id,
+        user=user_id,
+        text="👉 Click 'Run Diagnostic' to start.",
+    )
 
 
 def admin_required(func):  # noqa: ANN001
@@ -546,12 +583,11 @@ def publish_home_tab_async(
     user_id: str,
     active_tab: str = "overview",
     experiment_page: int = 0,
+    plan_suggestion: str | None = None,
 ) -> None:
     project_data = db_service.get_active_project(user_id)
-    all_projects = None
-    if project_data:
-        all_projects = db_service.get_user_projects(user_id)
-    view = get_home_view(user_id, project_data, all_projects)
+    all_projects = db_service.get_user_projects(user_id)
+    view = get_home_view(user_id, project_data, all_projects, plan_suggestion=plan_suggestion)
     client.views_publish(user_id=user_id, view=view)
 
     if not project_data:
@@ -559,7 +595,7 @@ def publish_home_tab_async(
 
     def update_actions() -> None:
         try:
-            refreshed_view = get_home_view(user_id, project_data, all_projects)
+            refreshed_view = get_home_view(user_id, project_data, all_projects, plan_suggestion=plan_suggestion)
             client.views_publish(user_id=user_id, view=refreshed_view)
         except Exception:
             logger.exception("Failed to generate and publish next best actions for user %s", user_id)
@@ -569,7 +605,282 @@ def publish_home_tab_async(
 def refresh_home(ack, body, client):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
-    publish_home_tab_hub(client, user_id)
+    publish_home_tab_async(client, user_id)
+
+
+@app.action("open_new_project_modal")
+def open_new_project_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    client.views_open(trigger_id=body["trigger_id"], view=get_new_project_modal())
+
+
+@app.view("new_project_submit")
+def handle_new_project_submit(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    values = body["view"]["state"]["values"]
+    try:
+        name = values["project_name"]["value"]["value"]
+        description = values["project_description"]["value"]["value"]
+        flow_stage = values["project_flow_stage"]["value"]["selected_option"]["value"]
+        project = db_service.create_project(user_id=user_id, name=name, description=description, flow_stage=flow_stage)
+        if project:
+            publish_home_tab_async(client, user_id)
+            _send_new_project_tour(client, user_id, project)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to create project via new modal", exc_info=True)
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Unable to create that project right now.")
+
+
+@app.action("action_set_flow_stage")
+def action_set_flow_stage(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    flow_stage = body["actions"][0].get("value")
+    project = db_service.get_active_project(user_id)
+    if not project or not flow_stage:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please select an active project first.")
+        return
+    db_service.update_project_flow_stage(project["id"], flow_stage)
+    plan_suggestion = None
+    if flow_stage == "plan":
+        plan_suggestion = _get_plan_suggestion(project)
+    publish_home_tab_async(client, user_id, "overview", plan_suggestion=plan_suggestion)
+
+
+def _get_plan_suggestion(project: dict) -> str | None:
+    assumptions = project.get("assumptions", [])
+    unsorted = [
+        assumption
+        for assumption in assumptions
+        if (assumption.get("horizon") or "").lower() not in {"now", "next", "later"}
+        or (assumption.get("lane") or "").lower() == "unsorted"
+    ]
+    if not unsorted:
+        return None
+    target = unsorted[0]
+    suggestion = ai_service.suggest_roadmap_horizon(target.get("title", ""))
+    if suggestion.get("error"):
+        return None
+    horizon = suggestion.get("horizon", "now")
+    reason = suggestion.get("reason", "critical risk to validate early")
+    return f"💡 AI Suggestion: Move *{target.get('title', 'assumption')}* to *{horizon.upper()}* because {reason}."
+
+
+@app.action("action_open_diagnostic")
+def action_open_diagnostic(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    ocp_questions = playbook.get_ocp_questions()
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view=get_diagnostic_modal(ocp_questions, project_id=project["id"]),
+    )
+
+
+@app.action("autofill_diagnostic")
+def autofill_diagnostic(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    view = body.get("view", {})
+    view_id = view.get("id")
+    project_id = view.get("private_metadata") or body["actions"][0].get("value")
+    if not view_id or not project_id:
+        return
+    try:
+        context_text = ingestion_service.get_project_context(int(project_id))
+        ocp_questions = playbook.get_ocp_questions()
+        if not context_text:
+            client.views_update(
+                view_id=view_id,
+                view=get_diagnostic_modal(
+                    ocp_questions,
+                    project_id=int(project_id),
+                    status_message="⚠️ No connected evidence found. Add files to auto-fill.",
+                ),
+            )
+            return
+        ai_response = ai_service.analyze_for_ocp(context_text)
+        if ai_response.get("error"):
+            client.views_update(
+                view_id=view_id,
+                view=get_diagnostic_modal(
+                    ocp_questions,
+                    project_id=int(project_id),
+                    status_message="⚠️ Unable to auto-fill from AI right now.",
+                ),
+            )
+            return
+        formatted: dict[str, dict[str, object]] = {}
+        for key, value in ai_response.items():
+            if not isinstance(value, dict):
+                continue
+            formatted[key] = value
+        client.views_update(
+            view_id=view_id,
+            view=get_diagnostic_modal(
+                ocp_questions,
+                project_id=int(project_id),
+                ai_data=formatted,
+                status_message="✨ Auto-filled from connected evidence.",
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to auto-fill diagnostic", exc_info=True)
+
+
+@app.view("action_save_diagnostic")
+def action_save_diagnostic(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    values = body["view"]["state"]["values"]
+    try:
+        ocp_questions = playbook.get_ocp_questions()
+        question_lookup = {
+            f"{category.lower()}__{key.lower()}": (category, question)
+            for category, questions in ocp_questions.items()
+            for key, question in questions.items()
+        }
+        answers: dict[str, str] = {}
+        confidences: dict[str, int] = {}
+        for block_id, block_values in values.items():
+            if block_id.startswith("ocp_answer__"):
+                lookup_key = block_id.replace("ocp_answer__", "")
+                answers[lookup_key] = block_values.get("answer", {}).get("value", "").strip()
+            if block_id.startswith("ocp_confidence__"):
+                lookup_key = block_id.replace("ocp_confidence__", "")
+                selection = block_values.get("confidence_score", {}).get("selected_option")
+                if selection:
+                    confidences[lookup_key] = int(selection["value"])
+        for lookup_key, (category, question) in question_lookup.items():
+            score = confidences.get(lookup_key)
+            if score is None:
+                continue
+            answer = answers.get(lookup_key)
+            db_service.upsert_diagnostic_assumption(project["id"], category, question, score, answer=answer)
+        publish_home_tab_async(client, user_id, "overview")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to save audit scores: %s", exc, exc_info=True)
+
+
+@app.action("open_roadmap_modal")
+def open_roadmap_modal(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    assumptions = project.get("assumptions", [])
+    if not assumptions:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Add assumptions before updating the roadmap.")
+        return
+    client.views_open(trigger_id=body["trigger_id"], view=get_roadmap_modal(assumptions))
+
+
+@app.action("open_decision_vote")
+def open_decision_vote(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    assumption_id = int(body["actions"][0]["value"])
+    assumption = db_service.get_assumption(assumption_id)
+    if not assumption:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Assumption not found.")
+        return
+    project = db_service.get_active_project(user_id)
+    channel_id = project.get("channel_id") if project else user_id
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view=decision_vote_modal(
+            assumption_title=assumption.get("title", "Untitled"),
+            assumption_id=assumption_id,
+            channel_id=channel_id,
+        ),
+    )
+
+
+@app.view("save_roadmap_horizon")
+def save_roadmap_horizon(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    values = body["view"]["state"]["values"]
+    try:
+        assumption_value = values["roadmap_assumption_select"]["assumption_id"]["selected_option"]["value"]
+        horizon_value = values["roadmap_horizon_select"]["horizon"]["selected_option"]["value"]
+        db_service.update_assumption_horizon(int(assumption_value), horizon_value)
+        publish_home_tab_async(client, user_id, "overview")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to update roadmap horizon: %s", exc, exc_info=True)
+
+
+@app.action("view_playbook_methods")
+def view_playbook_methods(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    stage = project.get("stage", "Define") if project else "Define"
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view={
+            "type": "modal",
+            "title": {"type": "plain_text", "text": "Playbook Methods"},
+            "close": {"type": "plain_text", "text": "Close"},
+            "blocks": method_cards(stage),
+        },
+    )
+
+
+@app.action("generate_meeting_agenda")
+def generate_meeting_agenda(ack, body, client):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please select a project first.")
+        return
+    agenda = ai_service.generate_meeting_agenda(project.get("flow_stage", "audit"), project.get("name", "Project"))
+    channel_id = project.get("channel_id") or user_id
+    client.chat_postMessage(
+        channel=channel_id,
+        text="Meeting agenda",
+        blocks=[
+            {"type": "header", "text": {"type": "plain_text", "text": "📅 Meeting Agenda"}},
+            {"type": "section", "text": {"type": "mrkdwn", "text": agenda}},
+        ],
+    )
+
+
+@app.action("export_strategy_doc")
+def export_strategy_doc(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please select a project first.")
+        return
+    report_path = None
+    try:
+        report_path = report_service.generate_strategy_doc(project)
+        channel_id = project.get("channel_id") or user_id
+        client.files_upload_v2(
+            channel=channel_id,
+            title=f"Strategy Report · {project.get('name', 'Project')}",
+            filename=f"strategy-report-{project.get('id', 'project')}.md",
+            file=str(report_path),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to export strategy doc", exc_info=True)
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Unable to export the strategy doc right now.")
+    finally:
+        if report_path and report_path.exists():
+            report_path.unlink()
 
 
 @app.action(re.compile(r"^(nav|tab)_"))
@@ -869,6 +1180,9 @@ def handle_create_project(ack, body, client, logger):  # noqa: ANN001
         mission=mission,
         channel_id=channel_id,
     )
+    project = db_service.get_active_project(user_id)
+    if project:
+        _send_new_project_tour(client, user_id, project)
 
     # 4. Refresh Home
     app_home_opened(client, {"user": user_id}, None)
@@ -1021,6 +1335,27 @@ def handle_help_command(ack, body, client):  # noqa: ANN001
         text="Evidently Help Guide",
         blocks=blocks,
     )
+
+
+@app.command("/evidently-link")
+def handle_link_project(ack, body, respond, client, logger):  # noqa: ANN001
+    ack()
+    try:
+        project_name = (body.get("text") or "").strip()
+        if not project_name:
+            respond("Usage: `/evidently-link project name`")
+            return
+        project_id = db_service.find_project_by_fuzzy_name(project_name)
+        if not project_id:
+            respond(f"Could not find a project named '{project_name}'.")
+            return
+        db_service.update_project(project_id, {"channel_id": body["channel_id"]})
+        db_service.set_active_project(body["user_id"], project_id)
+        respond(f"✅ Linked this channel to project {project_name}.")
+        publish_home_tab_async(client, body["user_id"])
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to link project via command", exc_info=True)
+        respond("Unable to link project right now.")
 
 
 @app.command("/evidently-feedback")
@@ -1435,6 +1770,9 @@ def handle_final_setup(ack, body, client, logger):  # noqa: ANN001
             mission=mission,
             channel_id=channel_id,
         )
+        project = db_service.get_active_project(user_id)
+        if project:
+            _send_new_project_tour(client, user_id, project)
 
         msg_text = f"🎉 *{name}* is live!"
         if created_channel_name:
@@ -3068,52 +3406,104 @@ def open_create_experiment_modal(ack, body, client):  # noqa: ANN001
     _open_create_experiment_modal(client, body["trigger_id"])
 
 
+@app.action("log_experiment_for_assumption")
+def log_experiment_for_assumption(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    assumption_id = int(body["actions"][0]["value"])
+    assumption = db_service.get_assumption(assumption_id)
+    if not assumption:
+        client.chat_postEphemeral(channel=body["user"]["id"], user=body["user"]["id"], text="Assumption not found.")
+        return
+    phase = assumption.get("test_and_learn_phase", "define")
+    recommendation = ai_service.recommend_playbook_method(phase, assumption.get("title", ""), playbook.methods)
+    method_id = recommendation.get("method_id") if isinstance(recommendation, dict) else None
+    method = playbook.get_method_details(method_id) if method_id else None
+    initial_method = method.get("name") if method else None
+    suggestion_note = None
+    if initial_method:
+        reason = recommendation.get("reason", "matches the current phase")
+        suggestion_note = f"Pre-selected: *{initial_method}* because {reason}."
+    _open_create_experiment_modal(
+        client,
+        body["trigger_id"],
+        initial_method=initial_method,
+        assumption_id=assumption_id,
+        suggestion_note=suggestion_note,
+    )
+
+
 @app.action("create_experiment_manual")
 def open_manual_experiment_modal(ack, body, client):  # noqa: ANN001
     ack()
     _open_create_experiment_modal(client, body["trigger_id"])
 
 
-def _open_create_experiment_modal(client, trigger_id: str) -> None:  # noqa: ANN001
+def _open_create_experiment_modal(
+    client,
+    trigger_id: str,
+    initial_method: str | None = None,
+    assumption_id: int | None = None,
+    suggestion_note: str | None = None,
+) -> None:  # noqa: ANN001
+    method_options = [
+        {"text": {"type": "plain_text", "text": "Fake Door"}, "value": "Fake Door"},
+        {
+            "text": {"type": "plain_text", "text": ToolkitService.DEFAULT_METHOD_NAME},
+            "value": ToolkitService.DEFAULT_METHOD_NAME,
+        },
+        {"text": {"type": "plain_text", "text": "A/B Test"}, "value": "A/B Test"},
+        {"text": {"type": "plain_text", "text": "Concierge MVP"}, "value": "Concierge MVP"},
+    ]
+    for method_data in playbook.methods.values():
+        method_name = method_data.get("name")
+        if not method_name:
+            continue
+        if any(option["value"] == method_name for option in method_options):
+            continue
+        method_options.append({"text": {"type": "plain_text", "text": method_name}, "value": method_name})
+    initial_option = next(
+        (option for option in method_options if option["value"] == initial_method),
+        None,
+    )
+    blocks = []
+    if suggestion_note:
+        blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": suggestion_note}]})
+    blocks.extend(
+        [
+            {
+                "type": "input",
+                "block_id": "title_block",
+                "label": {"type": "plain_text", "text": "Experiment Title"},
+                "element": {"type": "plain_text_input", "action_id": "title"},
+            },
+            {
+                "type": "input",
+                "block_id": "method_block",
+                "label": {"type": "plain_text", "text": "Method"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "method",
+                    "options": method_options,
+                    "initial_option": initial_option,
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "hypothesis_block",
+                "label": {"type": "plain_text", "text": "Hypothesis"},
+                "element": {"type": "plain_text_input", "action_id": "hypothesis", "multiline": True},
+            },
+        ]
+    )
     client.views_open(
         trigger_id=trigger_id,
         view={
             "type": "modal",
             "callback_id": "create_experiment_submit",
+            "private_metadata": str(assumption_id) if assumption_id else "",
             "title": {"type": "plain_text", "text": "New Experiment"},
             "close": {"type": "plain_text", "text": "Cancel"},
-            "blocks": [
-                {
-                    "type": "input",
-                    "block_id": "title_block",
-                    "label": {"type": "plain_text", "text": "Experiment Title"},
-                    "element": {"type": "plain_text_input", "action_id": "title"},
-                },
-                {
-                    "type": "input",
-                    "block_id": "method_block",
-                    "label": {"type": "plain_text", "text": "Method"},
-                    "element": {
-                        "type": "static_select",
-                        "action_id": "method",
-                        "options": [
-                            {"text": {"type": "plain_text", "text": "Fake Door"}, "value": "Fake Door"},
-                            {
-                                "text": {"type": "plain_text", "text": ToolkitService.DEFAULT_METHOD_NAME},
-                                "value": ToolkitService.DEFAULT_METHOD_NAME,
-                            },
-                            {"text": {"type": "plain_text", "text": "A/B Test"}, "value": "A/B Test"},
-                            {"text": {"type": "plain_text", "text": "Concierge MVP"}, "value": "Concierge MVP"},
-                        ],
-                    },
-                },
-                {
-                    "type": "input",
-                    "block_id": "hypothesis_block",
-                    "label": {"type": "plain_text", "text": "Hypothesis"},
-                    "element": {"type": "plain_text_input", "action_id": "hypothesis", "multiline": True},
-                },
-            ],
+            "blocks": blocks,
             "submit": {"type": "plain_text", "text": "Launch Experiment"},
         },
     )
@@ -3128,6 +3518,8 @@ def handle_create_experiment(ack, body, client, logger):  # noqa: ANN001
         title = values["title_block"]["title"]["value"]
         method = values["method_block"]["method"]["selected_option"]["value"]
         hypothesis = values["hypothesis_block"]["hypothesis"]["value"]
+        assumption_id_value = (body["view"].get("private_metadata") or "").strip()
+        assumption_id = int(assumption_id_value) if assumption_id_value else None
 
         project = db_service.get_active_project(user_id)
         if not project:
@@ -3139,6 +3531,7 @@ def handle_create_experiment(ack, body, client, logger):  # noqa: ANN001
             title=title,
             method=method,
             hypothesis=hypothesis,
+            assumption_id=assumption_id,
         )
         if project.get("channel_id"):
             client.chat_postMessage(
@@ -3867,6 +4260,10 @@ def submit_decision_vote(ack, body, view, client, logger):  # noqa: ANN001
             uncertainty_score=uncertainty,
         )
         summary = decision_service.reveal_results(assumption_id)
+        if summary.get("avg_uncertainty", 0) >= 4:
+            db_service.update_assumption_horizon(assumption_id, "now")
+        elif summary.get("avg_uncertainty", 0) <= 2:
+            db_service.update_assumption_horizon(assumption_id, "later")
         heatmap = decision_heatmap_label(summary["avg_impact"], summary["avg_uncertainty"])
         client.chat_postMessage(
             channel=channel_id,
