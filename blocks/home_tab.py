@@ -154,7 +154,7 @@ def get_home_view(
     if all_projects:
         project_options = [
             {
-                "text": {"type": "plain_text", "text": item["name"][:_MAX_PROJECT_NAME_LENGTH_SLACK_UI]},
+                "text": {"type": "plain_text", "text": (item["name"][:_MAX_PROJECT_NAME_LENGTH_SLACK_UI - 3] + "...") if len(item["name"]) > _MAX_PROJECT_NAME_LENGTH_SLACK_UI else item["name"]},
                 "value": str(item["id"]),
             }
             for item in all_projects
