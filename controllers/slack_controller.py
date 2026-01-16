@@ -6,7 +6,7 @@ import re
 import threading
 import time
 from functools import wraps
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from urllib import error as url_error
@@ -1348,7 +1348,45 @@ def handle_help_command(ack, body, client):  # noqa: ANN001
     """
     ack()
     user_id = body["user_id"]
-    blocks = UIManager.render_help_guide()
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "Evidently · Audit → Plan → Action"},
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "*Audit (Health Check)*\n"
+                    "• Run /evidently-status to review project health and diagnostic signals.\n\n"
+                    "*Plan (Roadmap)*\n"
+                    "• Use /evidently-log to capture assumptions from conversation context.\n\n"
+                    "*Action (Test & Learn)*\n"
+                    "• Use /evidently-methods to discover experiments and playbook guidance."
+                ),
+            },
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": "Need more help? Open the dashboard for guided workflows and nudges.",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Open Dashboard"},
+                    "action_id": "refresh_home",
+                    "style": "primary",
+                }
+            ],
+        },
+    ]
     client.chat_postEphemeral(
         channel=body["channel_id"],
         user=user_id,
@@ -1363,30 +1401,64 @@ def handle_link_project(ack, body, respond, client, logger):  # noqa: ANN001
     try:
         project_name = (body.get("text") or "").strip()
         if not project_name:
-            respond("Usage: `/evidently-link project name`")
+            client.views_open(trigger_id=body["trigger_id"], view=link_channel_modal())
             return
         user_projects = db_service.get_user_projects(body["user_id"])
         normalized_name = project_name.lower()
-        project = next(
-            (item for item in user_projects if item.get("name", "").lower() == normalized_name),
-            None,
-        )
-        if not project:
-            project = next(
-                (item for item in user_projects if normalized_name in item.get("name", "").lower()),
-                None,
-            )
-        if not project:
-            respond("Could not find a project with that name in your projects.")
+        exact_matches = [
+            item for item in user_projects if item.get("name", "").lower() == normalized_name
+        ]
+        matches = exact_matches or [
+            item for item in user_projects if normalized_name in item.get("name", "").lower()
+        ]
+        if len(matches) != 1:
+            client.views_open(trigger_id=body["trigger_id"], view=link_channel_modal())
             return
+        project = matches[0]
         project_id = project["id"]
-        db_service.update_project(project_id, {"channel_id": body["channel_id"]})
+        db_service.set_project_channel(project_id, body["channel_id"])
         db_service.set_active_project(body["user_id"], project_id)
-        respond(f"✅ Linked this channel to project {project['name']}.")
+        respond(f"✅ This channel is now linked to {project['name']}.")
         publish_home_tab_async(client, body["user_id"])
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to link project via command", exc_info=True)
         respond("Unable to link project right now.")
+
+
+@app.command("/evidently-log")
+def handle_log_command(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    channel_id = body["channel_id"]
+    trigger_id = body["trigger_id"]
+    ai_data = None
+    try:
+        history = client.conversations_history(channel=channel_id, limit=10)
+        messages = history.get("messages", [])
+        if messages:
+            conversation_text = "\n".join(
+                message.get("text", "")
+                for message in reversed(messages)
+                if message.get("text")
+            )
+            attachments = [
+                {"name": file.get("name"), "mimetype": file.get("mimetype")}
+                for message in messages
+                for file in message.get("files", []) or []
+            ]
+            analysis = ai_service.analyze_thread_structured(conversation_text, attachments)
+            if analysis and not analysis.get("error"):
+                assumption = (analysis.get("assumptions") or [{}])[0]
+                ai_data = {
+                    "text": assumption.get("text", ""),
+                    "category": assumption.get("category", "Opportunity"),
+                }
+        client.views_open(trigger_id=trigger_id, view=open_log_assumption_modal(ai_data))
+    except SlackApiError as exc:
+        logger.error("Failed to fetch conversation history for log command: %s", exc, exc_info=True)
+        client.views_open(trigger_id=trigger_id, view=open_log_assumption_modal())
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to run log command", exc_info=True)
+        client.views_open(trigger_id=trigger_id, view=open_log_assumption_modal())
 
 
 @app.command("/evidently-feedback")
@@ -4517,9 +4589,43 @@ def draft_plan(ack, body, respond, logger):  # noqa: ANN001
 
 
 @app.command("/evidently-nudge")
-def handle_nudge_command(ack, respond):  # noqa: ANN001
+def handle_nudge_command(ack, body, client, logger):  # noqa: ANN001
     ack()
-    respond("Use the nudges in your home tab to manage assumptions.")
+    user_id = body["user_id"]
+    channel_id = body["channel_id"]
+    try:
+        project = db_service.get_project_by_channel(channel_id) or db_service.get_active_project(user_id)
+        if not project:
+            client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text="Please select a project first.",
+            )
+            return
+        assumptions = project.get("assumptions", [])
+        cutoff = datetime.utcnow() - timedelta(days=14)
+        stale = []
+        for assumption in assumptions:
+            if assumption.get("status") != "Testing":
+                continue
+            last_tested = assumption.get("last_tested_at")
+            if not last_tested:
+                continue
+            try:
+                if datetime.fromisoformat(last_tested) < cutoff:
+                    stale.append(assumption)
+            except ValueError:
+                continue
+        count = len(stale)
+        text = f"Found {count} stale assumptions. [View Board]"
+        client.chat_postEphemeral(channel=channel_id, user=user_id, text=text)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to run nudge command", exc_info=True)
+        client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text="Unable to check stale assumptions right now.",
+        )
 
 
 def daily_standup_job(client):  # noqa: ANN001
