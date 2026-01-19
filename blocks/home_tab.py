@@ -63,10 +63,11 @@ def _status_emoji(status: str, is_stale: bool) -> str:
 
 
 def _confidence_label(confidence: int | None) -> tuple[str, bool]:
-    if confidence in (None, 0):
-        return "Unscored", False
-    is_low = confidence < _LOW_CONFIDENCE_THRESHOLD
-    return f"{confidence}/5", is_low
+    score = confidence or 0
+    score = max(0, min(5, int(score)))
+    stars = "⭐" * score + "☆" * (5 - score)
+    is_low = 0 < score < _LOW_CONFIDENCE_THRESHOLD
+    return stars, is_low
 
 
 def _assumption_section(assumption: dict[str, Any], highlight_low_confidence: bool = False) -> dict[str, Any]:
@@ -78,7 +79,7 @@ def _assumption_section(assumption: dict[str, Any], highlight_low_confidence: bo
     emoji = _status_emoji(status, is_stale)
     confidence = assumption.get("confidence_score")
     confidence_text, low_confidence = _confidence_label(confidence)
-    low_flag = " · *Low Confidence*" if low_confidence and highlight_low_confidence else ""
+    low_flag = " · ⚠️ Needs Evidence" if low_confidence and highlight_low_confidence else ""
     owner_id = assumption.get("owner_id")
     owner_text = f" · Owner: <@{owner_id}>" if owner_id else ""
     title_text = _truncate(assumption.get("title", "Untitled"))
@@ -117,8 +118,8 @@ def _plan_assumption_blocks(assumption: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "type": "actions",
             "elements": [
+                _safe_button("📍 Move", "move_assumption", value=assumption["id"]),
                 _safe_button("🗳️ Decision Room", "open_decision_vote", value=assumption["id"]),
-                _safe_button("Design Test", "design_experiment", value=assumption["id"]),
             ],
         },
     ]
@@ -168,9 +169,12 @@ def _get_current_phase(assumptions: list[dict[str, Any]]) -> str:
 
     sorted_assumptions = sorted(assumptions, key=_sort_key, reverse=True)
     for assumption in sorted_assumptions:
-        phase = assumption.get("test_and_learn_phase")
+        phase = assumption.get("test_phase") or assumption.get("test_and_learn_phase")
         if phase:
-            return str(phase).lower()
+            normalized = str(phase).lower()
+            if normalized == "diffuse":
+                return "scale"
+            return normalized
     return "define"
 
 
@@ -217,11 +221,6 @@ def get_home_view(
         if (assumption.get("status") or assumption.get("validation_status")) == "Validated"
     )
     health_score = int((validated_count / total_assumptions) * 100) if total_assumptions else 0
-    avg_confidence = (
-        int(sum((assumption.get("confidence_score") or 0) for assumption in assumptions) / total_assumptions * 20)
-        if total_assumptions
-        else 0
-    )
 
     flow_stage = (project.get("flow_stage") or "audit").lower() if project else "audit"
     flow_label = _FLOW_STAGE_LABELS.get(flow_stage, "Audit")
@@ -274,6 +273,15 @@ def get_home_view(
     blocks.append({"type": "actions", "elements": action_elements})
 
     if project:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Health Score:* {UIManager._progress_bar(health_score)}",
+                },
+            }
+        )
         channel_text = (
             f"Currently linked to channel: <#{project.get('channel_id')}>"
             if project.get("channel_id")
@@ -283,15 +291,6 @@ def get_home_view(
             {
                 "type": "context",
                 "elements": [{"type": "mrkdwn", "text": channel_text}],
-            }
-        )
-        blocks.append(
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Innovation Score:* {UIManager._progress_bar(avg_confidence)}",
-                },
             }
         )
 
@@ -332,6 +331,7 @@ def get_home_view(
                     "type": "actions",
                     "elements": [
                         _safe_button("📝 Run Diagnostic", "action_open_diagnostic", style="primary"),
+                        _safe_button("✨ Auto-Fill with AI", "auto_fill_from_evidence"),
                         _safe_button("➕ Add Assumption", "open_add_assumption"),
                         _safe_button("🔄 Refresh", "refresh_home"),
                     ],
@@ -480,7 +480,7 @@ def get_home_view(
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": "_Methodology map placeholder: Define → Shape Systems → Develop → Test & Learn → Diffuse._",
+                        "text": "_Methodology map: Define → Shape Systems → Develop → Test & Learn → Scale._",
                     },
                 },
                 {"type": "divider"},

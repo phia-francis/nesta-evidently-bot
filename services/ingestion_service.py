@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 import re
@@ -66,7 +67,7 @@ class IngestionService:
 
         return self.sanitize_text(text)[:50000]
 
-    def process_drive_files(self, project_id: int) -> str:
+    async def process_drive_files_async(self, project_id: int) -> str:
         if not self.db_service:
             logger.warning("DbService missing for drive processing.")
             return ""
@@ -86,18 +87,18 @@ class IngestionService:
                 continue
             mime_type = file_item.get("mime_type")
             if not mime_type:
-                metadata = self.drive_service.get_file_metadata(file_id) or {}
+                metadata = await asyncio.to_thread(self.drive_service.get_file_metadata, file_id) or {}
                 mime_type = metadata.get("mimeType")
             if not mime_type:
                 continue
 
             if "google-apps.document" in mime_type:
-                text = self.drive_service.get_file_content(file_id)
+                text = await asyncio.to_thread(self.drive_service.get_file_content, file_id)
                 if text:
                     content_parts.append(text)
                 continue
 
-            file_bytes = self.drive_service.download_file(file_id)
+            file_bytes = await asyncio.to_thread(self.drive_service.download_file, file_id)
             if not file_bytes:
                 continue
             try:
@@ -110,7 +111,12 @@ class IngestionService:
         return "\n".join(content_parts).strip()
 
     def ingest_project_files(self, project_id: int) -> str:
-        return self.process_drive_files(project_id)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(self.process_drive_files_async(project_id))
+        future = asyncio.run_coroutine_threadsafe(self.process_drive_files_async(project_id), loop)
+        return future.result()
 
     def extract_text_payload(self, file_content: bytes, file_type: str) -> dict:
         """Extract and chunk text for downstream ingestion.

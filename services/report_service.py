@@ -90,3 +90,54 @@ class ReportService:
         temp_file.flush()
         temp_file.close()
         return Path(temp_file.name)
+
+    def generate_meeting_agenda(self, project_id: int) -> str:
+        project = self.db_service.get_project(project_id)
+        if not project:
+            return "- Welcome & goals\n- Review project status\n- Agree next steps"
+        flow_stage = (project.get("flow_stage") or "audit").lower()
+        assumptions = project.get("assumptions", [])
+        experiments = project.get("experiments", [])
+
+        if flow_stage == "audit":
+            low_confidence = [a for a in assumptions if (a.get("confidence_score") or 0) < 3]
+            focus_items = low_confidence or assumptions
+            focus_lines = [
+                f"- {item.get('title', 'Untitled')} (Confidence {item.get('confidence_score', 0)}/5)"
+                for item in focus_items
+            ] or ["- No assumptions logged yet."]
+            return "\n".join(
+                [
+                    "*Agenda Focus: Low Confidence Assumptions*",
+                    "- Quick recap of evidence gathered",
+                    "- Prioritise assumptions needing evidence",
+                    *focus_lines,
+                    "- Decide next evidence to collect",
+                ]
+            )
+
+        if flow_stage == "plan":
+            now_items = [a.get("title", "Untitled") for a in assumptions if (a.get("horizon") or "") == "now"]
+            now_lines = [f"- {item}" for item in now_items] or ["- No NOW items yet."]
+            return "\n".join(
+                [
+                    "*Agenda Focus: Agreeing on the NOW column*",
+                    "- Review current roadmap horizons",
+                    "- Align on NOW items for validation",
+                    *now_lines,
+                    "- Assign owners and next moves",
+                ]
+            )
+
+        experiment_lines = [
+            f"- {exp.get('title', 'Untitled')} ({exp.get('status', 'Planning')})"
+            for exp in experiments
+        ] or ["- No experiments logged yet."]
+        return "\n".join(
+            [
+                "*Agenda Focus: Reviewing Experiment Results*",
+                "- Review recent experiments and outcomes",
+                *experiment_lines,
+                "- Decide adjustments and next experiments",
+            ]
+        )
