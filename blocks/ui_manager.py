@@ -1062,44 +1062,24 @@ class UIManager:
     @staticmethod
     def render_help_guide() -> list[dict[str, Any]]:
         return [
-            {"type": "header", "text": {"type": "plain_text", "text": "📘 How to use Evidently"}},
+            {"type": "header", "text": {"type": "plain_text", "text": "Evidently · Audit → Plan → Action"}},
             {
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
                     "text": (
-                        "*Start with the Structured Roadmap*\n"
-                        "Capture opportunity, capability, and progress measures when you create a project."
-                    ),
-                },
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": (
-                        "*Risk Categories*\n"
-                        "• 💰 *Value* — does this solve a meaningful problem?\n"
-                        "• 📈 *Growth* — can we reach and grow the audience?\n"
-                        "• ♻️ *Sustainability* — can we sustain the model over time?\n"
-                        "• 🌍 *Impact* — will this create the intended outcomes?\n"
-                        "• ⚙️ *Feasibility* — can we deliver with available resources?"
-                    ),
-                },
-            },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": (
-                        "*Evidence Nudges*\n"
-                        "Add evidence links to every assumption and keep experiments updated to show weekly wins."
+                        "*Audit (Health Check)*\n"
+                        "• Run /evidently-status to review project health and diagnostic signals.\n\n"
+                        "*Plan (Roadmap)*\n"
+                        "• Use /evidently-log to capture assumptions from conversation context.\n\n"
+                        "*Action (Test & Learn)*\n"
+                        "• Use /evidently-methods to discover experiments and playbook guidance."
                     ),
                 },
             },
             {
                 "type": "actions",
-                "elements": [UIManager._safe_button("Open Dashboard", "refresh_home")],
+                "elements": [UIManager._safe_button("Open Dashboard", "refresh_home", style="primary")],
             },
         ]
 
