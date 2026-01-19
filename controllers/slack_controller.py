@@ -1348,45 +1348,7 @@ def handle_help_command(ack, body, client):  # noqa: ANN001
     """
     ack()
     user_id = body["user_id"]
-    blocks = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": "Evidently · Audit → Plan → Action"},
-        },
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    "*Audit (Health Check)*\n"
-                    "• Run /evidently-status to review project health and diagnostic signals.\n\n"
-                    "*Plan (Roadmap)*\n"
-                    "• Use /evidently-log to capture assumptions from conversation context.\n\n"
-                    "*Action (Test & Learn)*\n"
-                    "• Use /evidently-methods to discover experiments and playbook guidance."
-                ),
-            },
-        },
-        {"type": "divider"},
-        {
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "Need more help? Open the dashboard for guided workflows and nudges.",
-            },
-        },
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "Open Dashboard"},
-                    "action_id": "refresh_home",
-                    "style": "primary",
-                }
-            ],
-        },
-    ]
+    blocks = UIManager.render_help_guide()
     client.chat_postEphemeral(
         channel=body["channel_id"],
         user=user_id,
@@ -1430,35 +1392,41 @@ def handle_log_command(ack, body, client, logger):  # noqa: ANN001
     ack()
     channel_id = body["channel_id"]
     trigger_id = body["trigger_id"]
-    ai_data = None
     try:
-        history = client.conversations_history(channel=channel_id, limit=10)
-        messages = history.get("messages", [])
-        if messages:
-            conversation_text = "\n".join(
-                message.get("text", "")
-                for message in reversed(messages)
-                if message.get("text")
-            )
-            attachments = [
-                {"name": file.get("name"), "mimetype": file.get("mimetype")}
-                for message in messages
-                for file in message.get("files", []) or []
-            ]
-            analysis = ai_service.analyze_thread_structured(conversation_text, attachments)
-            if analysis and not analysis.get("error"):
-                assumption = (analysis.get("assumptions") or [{}])[0]
-                ai_data = {
-                    "text": assumption.get("text", ""),
-                    "category": assumption.get("category", "Opportunity"),
-                }
-        client.views_open(trigger_id=trigger_id, view=open_log_assumption_modal(ai_data))
+        loading_response = client.views_open(trigger_id=trigger_id, view=get_loading_modal())
+        view_id = loading_response["view"]["id"]
     except SlackApiError as exc:
-        logger.error("Failed to fetch conversation history for log command: %s", exc, exc_info=True)
-        client.views_open(trigger_id=trigger_id, view=open_log_assumption_modal())
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to run log command", exc_info=True)
-        client.views_open(trigger_id=trigger_id, view=open_log_assumption_modal())
+        logger.error("Failed to open loading modal for log command: %s", exc, exc_info=True)
+        return
+
+    def background_task() -> None:
+        ai_data = None
+        try:
+            history = client.conversations_history(channel=channel_id, limit=10)
+            messages = history.get("messages", [])
+            if messages:
+                conversation_text = "\n".join(
+                    message.get("text", "")
+                    for message in reversed(messages)
+                    if message.get("text")
+                )
+                attachments = [
+                    {"name": file.get("name"), "mimetype": file.get("mimetype")}
+                    for message in messages
+                    for file in message.get("files", []) or []
+                ]
+                analysis = ai_service.analyze_thread_structured(conversation_text, attachments)
+                if analysis and not analysis.get("error"):
+                    assumption = (analysis.get("assumptions") or [{}])[0]
+                    ai_data = {
+                        "text": assumption.get("text", ""),
+                        "category": assumption.get("category", "Opportunity"),
+                    }
+            client.views_update(view_id=view_id, view=open_log_assumption_modal(ai_data))
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to run log command in background", exc_info=True)
+            client.views_update(view_id=view_id, view=open_log_assumption_modal())
+    run_in_background(background_task)
 
 
 @app.command("/evidently-feedback")
@@ -4617,7 +4585,7 @@ def handle_nudge_command(ack, body, client, logger):  # noqa: ANN001
             except ValueError:
                 continue
         count = len(stale)
-        text = f"Found {count} stale assumptions. [View Board]"
+        text = f"Found {count} stale assumptions. View the board in the Home tab."
         client.chat_postEphemeral(channel=channel_id, user=user_id, text=text)
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to run nudge command", exc_info=True)
