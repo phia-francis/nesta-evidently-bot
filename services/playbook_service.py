@@ -30,18 +30,18 @@ class PlaybookService:
         self.roadmap_horizons = [
             {
                 "key": "now",
-                "label": "NOW (Alpha)",
-                "description": "Validating the Concept. (Focus: Desirability, Viability).",
+                "label": "NOW (Validation)",
+                "description": "Validate the riskiest assumptions and proof points.",
             },
             {
                 "key": "next",
-                "label": "NEXT (Beta)",
-                "description": "Validating Growth. (Focus: Scalable channels, Retention).",
+                "label": "NEXT (Growth)",
+                "description": "Prove scalable channels and sustainable growth.",
             },
             {
                 "key": "later",
-                "label": "LATER (Scale)",
-                "description": "Validating System Change. (Focus: Institutional adoption).",
+                "label": "LATER (System)",
+                "description": "Embed the solution into the wider system.",
             },
         ]
         self.test_and_learn_phases = [
@@ -49,31 +49,31 @@ class PlaybookService:
                 "key": "define",
                 "label": "DEFINE",
                 "title": "Set direction.",
-                "activities": ["Map stakeholder needs", "Evidence reviews"],
+                "activities": ["Map stakeholder needs", "Review existing evidence", "Define target outcome"],
             },
             {
                 "key": "shape",
                 "label": "SHAPE SYSTEMS",
-                "title": "Enable environment.",
-                "activities": ["Remove bureaucratic blockers", "Secure resources"],
+                "title": "Enable the conditions.",
+                "activities": ["Identify blockers", "Secure permissions", "Remove bureaucratic hurdles"],
             },
             {
                 "key": "develop",
                 "label": "DEVELOP",
                 "title": "Create solutions.",
-                "activities": ["Low-fidelity prototypes", "Policy blueprints"],
+                "activities": ["Generate solution ideas", "Low-fidelity prototyping", "Draft policy outlines"],
             },
             {
                 "key": "test",
                 "label": "TEST & LEARN",
-                "title": "Iterative loop.",
-                "activities": ["Design rapid experiments (Fake Door, Wizard of Oz)"],
+                "title": "Experiment and learn fast.",
+                "activities": ["Execute rapid experiments", "Wizard of Oz tests", "Analyze feedback"],
             },
             {
-                "key": "diffuse",
-                "label": "DIFFUSE",
-                "title": "Expand impact.",
-                "activities": ["Codify knowledge", "Integrate into 'Business as Usual'"],
+                "key": "scale",
+                "label": "SCALE",
+                "title": "Embed and expand.",
+                "activities": ["Codify knowledge", "Integrate into BAU", "Expand to new markets"],
             },
         ]
 

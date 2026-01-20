@@ -29,14 +29,13 @@ from sqlalchemy.orm import Session, declarative_base, joinedload, relationship, 
 from cryptography.fernet import Fernet, InvalidToken
 
 from config import Config
+from constants import VALID_ASSUMPTION_CATEGORIES
 from services.toolkit_service import ToolkitService
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./evidently.db")
 
 ASSUMPTION_CATEGORY_ENUM = Enum(
-    "Opportunity",
-    "Capability",
-    "Progress",
+    *VALID_ASSUMPTION_CATEGORIES,
     name="assumption_category",
     native_enum=False,
 )
@@ -66,8 +65,17 @@ TEST_AND_LEARN_PHASE_ENUM = Enum(
     "shape",
     "develop",
     "test",
-    "diffuse",
+    "scale",
     name="test_and_learn_phase",
+    native_enum=False,
+)
+ASSUMPTION_TEST_PHASE_ENUM = Enum(
+    "define",
+    "shape",
+    "develop",
+    "test",
+    "scale",
+    name="assumption_test_phase",
     native_enum=False,
 )
 
@@ -210,15 +218,16 @@ class Assumption(Base):
     category = Column(ASSUMPTION_CATEGORY_ENUM, default="Opportunity")
     evidence_link = Column(Text)
     lane = Column(String(50), default="Now")
-    horizon = Column(ASSUMPTION_HORIZON_ENUM, default="now")
+    horizon = Column(ASSUMPTION_HORIZON_ENUM, nullable=True)
     validation_status = Column(String(50), default="Testing")
     status = Column(ASSUMPTION_STATUS_ENUM, default="Testing")
     evidence_density = Column(Integer, default=0)
     source_type = Column(String(50))
     source_id = Column(String(255))
     source_snippet = Column(Text)
-    confidence_score = Column(Integer, default=3)
+    confidence_score = Column(Integer, default=0)
     test_and_learn_phase = Column(TEST_AND_LEARN_PHASE_ENUM, default="define")
+    test_phase = Column(ASSUMPTION_TEST_PHASE_ENUM, nullable=True)
     last_tested_at = Column(DateTime, default=dt.datetime.utcnow)
     owner_id = Column(String(50))
     updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
@@ -364,6 +373,7 @@ class DbService:
                 "source_id",
                 "confidence_score",
                 "test_and_learn_phase",
+                "test_phase",
                 "last_tested_at",
                 "owner_id",
                 "updated_at",
@@ -417,8 +427,9 @@ class DbService:
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_type VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_id VARCHAR(255);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS source_snippet TEXT;"))
-                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 3;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS confidence_score INTEGER DEFAULT 0;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS test_and_learn_phase VARCHAR(50) DEFAULT 'define';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS test_phase VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMP;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS owner_id VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;"))
@@ -1092,6 +1103,7 @@ class DbService:
         with SessionLocal() as db:
             lane_value = data.get("lane", "Now")
             horizon_value = data.get("horizon") or lane_value.lower()
+            test_phase = data.get("test_phase") or data.get("test_and_learn_phase")
             assumption = Assumption(
                 project_id=project_id,
                 title=data.get("title"),
@@ -1104,9 +1116,10 @@ class DbService:
                 source_type=data.get("source_type"),
                 source_id=data.get("source_id"),
                 source_snippet=data.get("source_snippet"),
-                confidence_score=data.get("confidence_score", 3),
+                confidence_score=data.get("confidence_score", 0),
                 horizon=horizon_value if horizon_value in {"now", "next", "later"} else "now",
                 test_and_learn_phase=data.get("test_and_learn_phase", "define"),
+                test_phase=test_phase,
                 last_tested_at=data.get("last_tested_at", dt.datetime.utcnow()),
                 owner_id=data.get("owner_id"),
             )
@@ -1195,6 +1208,8 @@ class DbService:
                 assumption.horizon = data["horizon"]
             if "test_and_learn_phase" in data:
                 assumption.test_and_learn_phase = data["test_and_learn_phase"]
+            if "test_phase" in data:
+                assumption.test_phase = data["test_phase"]
             if "owner_id" in data:
                 assumption.owner_id = data["owner_id"]
             db.commit()
@@ -1486,6 +1501,7 @@ class DbService:
             "source_snippet": assumption.source_snippet,
             "confidence_score": assumption.confidence_score,
             "test_and_learn_phase": assumption.test_and_learn_phase,
+            "test_phase": assumption.test_phase,
             "last_tested_at": assumption.last_tested_at.isoformat() if assumption.last_tested_at else None,
             "owner_id": assumption.owner_id,
             "updated_at": assumption.updated_at.isoformat() if assumption.updated_at else None,

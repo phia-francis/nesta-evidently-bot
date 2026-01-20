@@ -1,6 +1,7 @@
 import io
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 import docx
 import pdfplumber
@@ -80,32 +81,33 @@ class IngestionService:
             return ""
 
         content_parts: list[str] = []
-        for file_item in files:
-            file_id = file_item.get("id")
-            if not file_id:
-                continue
-            mime_type = file_item.get("mime_type")
-            if not mime_type:
-                metadata = self.drive_service.get_file_metadata(file_id) or {}
-                mime_type = metadata.get("mimeType")
-            if not mime_type:
-                continue
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            for file_item in files:
+                file_id = file_item.get("id")
+                if not file_id:
+                    continue
+                mime_type = file_item.get("mime_type")
+                if not mime_type:
+                    metadata = executor.submit(self.drive_service.get_file_metadata, file_id).result() or {}
+                    mime_type = metadata.get("mimeType")
+                if not mime_type:
+                    continue
 
-            if "google-apps.document" in mime_type:
-                text = self.drive_service.get_file_content(file_id)
-                if text:
-                    content_parts.append(text)
-                continue
+                if "google-apps.document" in mime_type:
+                    text = executor.submit(self.drive_service.get_file_content, file_id).result()
+                    if text:
+                        content_parts.append(text)
+                    continue
 
-            file_bytes = self.drive_service.download_file(file_id)
-            if not file_bytes:
-                continue
-            try:
-                text = self.extract_text(file_bytes, mime_type)
-                if text:
-                    content_parts.append(text)
-            except IngestionError as exc:
-                logger.warning("Drive file %s skipped: %s", file_id, exc.user_message)
+                file_bytes = executor.submit(self.drive_service.download_file, file_id).result()
+                if not file_bytes:
+                    continue
+                try:
+                    text = self.extract_text(file_bytes, mime_type)
+                    if text:
+                        content_parts.append(text)
+                except IngestionError as exc:
+                    logger.warning("Drive file %s skipped: %s", file_id, exc.user_message)
 
         return "\n".join(content_parts).strip()
 

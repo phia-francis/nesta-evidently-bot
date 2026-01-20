@@ -5,8 +5,10 @@ import re
 from typing import Iterable
 
 import google.generativeai as genai
+from google.api_core.exceptions import GoogleAPICallError
 
 from config import Config
+from constants import ASSUMPTION_DEFAULT_CATEGORY, VALID_ASSUMPTION_CATEGORIES
 from services import knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -250,6 +252,52 @@ Return JSON: { "horizon": "now|next|later", "reason": "short explanation" }
         except Exception as exc:  # noqa: BLE001
             logger.error("AI Roadmap Suggestion - General failure", exc_info=True)
             return {"error": f"Could not suggest roadmap horizon: {exc}"}
+
+    def extract_structured_assumption(self, raw_text: str) -> dict:
+        if not raw_text:
+            return {"error": "Missing assumption text."}
+        prompt = (
+            "Extract the following from the raw text: "
+            "1. Core Assumption (Title), "
+            "2. Category (Opportunity/Capability/Progress), "
+            "3. Confidence Score (1-5). "
+            "Return JSON."
+        )
+        try:
+            response = self.model.generate_content(
+                f"{prompt}\nRaw text:\n{self._wrap_user_input(self.redact_pii(raw_text))}",
+                generation_config={"temperature": _TEMPERATURE},
+            )
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn only valid JSON. No markdown or commentary.",
+            )
+            if not isinstance(parsed, dict):
+                return {"error": "Invalid AI response."}
+            title = parsed.get("title") or parsed.get("assumption") or parsed.get("core_assumption")
+            category = parsed.get("category", ASSUMPTION_DEFAULT_CATEGORY)
+            confidence = parsed.get("confidence_score", parsed.get("confidence", 0))
+            try:
+                confidence_score = int(confidence)
+            except (TypeError, ValueError):
+                confidence_score = 0
+            confidence_score = max(0, min(5, confidence_score))
+            if category not in VALID_ASSUMPTION_CATEGORIES:
+                category = ASSUMPTION_DEFAULT_CATEGORY
+            return {
+                "title": str(title or raw_text).strip(),
+                "category": category,
+                "confidence_score": confidence_score,
+            }
+        except json.JSONDecodeError as exc:
+            logger.error("AI Assumption Extraction - Failed to parse JSON", exc_info=True)
+            return {"error": f"Could not parse assumption extraction: {exc}"}
+        except (GoogleAPICallError, ValueError) as exc:
+            logger.error("AI Assumption Extraction - Service failure", exc_info=True)
+            return {"error": f"Could not extract assumption: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("AI Assumption Extraction - General failure", exc_info=True)
+            return {"error": f"Could not extract assumption: {exc}"}
 
     def recommend_playbook_method(self, phase: str, assumption_text: str, method_catalog: dict) -> dict:
         if not assumption_text or not method_catalog:

@@ -25,6 +25,7 @@ from slack_sdk.errors import SlackApiError
 from blocks.home_tab import get_home_view
 from blocks.ui_manager import UIManager
 from constants import (
+    ASSUMPTION_DEFAULT_CATEGORY,
     HELP_ANALYSIS,
     HELP_HEADER,
     HELP_INTERVIEW,
@@ -865,7 +866,7 @@ def generate_meeting_agenda(ack, body, client):  # noqa: ANN001
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please select a project first.")
         return
-    agenda = ai_service.generate_meeting_agenda(project.get("flow_stage", "audit"), project.get("name", "Project"))
+    agenda = report_service.generate_meeting_agenda(project["id"])
     channel_id = project.get("channel_id") or user_id
     client.chat_postMessage(
         channel=channel_id,
@@ -1380,7 +1381,7 @@ def handle_link_project(ack, body, respond, client, logger):  # noqa: ANN001
         project_id = project["id"]
         db_service.set_project_channel(project_id, body["channel_id"])
         db_service.set_active_project(body["user_id"], project_id)
-        respond(f"✅ This channel is now linked to {project['name']}.")
+        respond(f"✅ Channel linked to *{project['name']}*.")
         publish_home_tab_async(client, body["user_id"])
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to link project via command", exc_info=True)
@@ -1420,13 +1421,45 @@ def handle_log_command(ack, body, client, logger):  # noqa: ANN001
                     assumption = (analysis.get("assumptions") or [{}])[0]
                     ai_data = {
                         "text": assumption.get("text", ""),
-                        "category": assumption.get("category", "Opportunity"),
                     }
             client.views_update(view_id=view_id, view=open_log_assumption_modal(ai_data))
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to run log command in background", exc_info=True)
             client.views_update(view_id=view_id, view=open_log_assumption_modal())
     run_in_background(background_task)
+
+
+@app.command("/evidently-agenda")
+def handle_agenda_command(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    try:
+        channel_id = body["channel_id"]
+        project = db_service.get_project_by_channel(channel_id)
+        if not project:
+            project = db_service.get_active_project(body["user_id"])
+        if not project:
+            client.chat_postEphemeral(
+                channel=channel_id,
+                user=body["user_id"],
+                text="Please link a project to this channel first.",
+            )
+            return
+        agenda = report_service.generate_meeting_agenda(project["id"])
+        client.chat_postMessage(
+            channel=channel_id,
+            text="Meeting agenda",
+            blocks=[
+                {"type": "header", "text": {"type": "plain_text", "text": "📅 Meeting Agenda"}},
+                {"type": "section", "text": {"type": "mrkdwn", "text": agenda}},
+            ],
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to generate agenda", exc_info=True)
+        client.chat_postEphemeral(
+            channel=body["channel_id"],
+            user=body["user_id"],
+            text="Unable to generate the agenda right now.",
+        )
 
 
 @app.command("/evidently-feedback")
@@ -3258,43 +3291,72 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
     user_id = body["user"]["id"]
     try:
         values = body["view"]["state"]["values"]
-        title = values["assumption_title"]["title_input"]["value"]
-        category = values["assumption_category"]["assumption_category_select"]["selected_option"]["value"]
-        lane = values["assumption_lane"]["lane_input"]["selected_option"]["value"]
-        status = values["assumption_status"]["status_input"]["selected_option"]["value"]
-        density_text = values["assumption_density"]["density_input"]["value"]
-        evidence_link = values.get("assumption_evidence_link", {}).get("evidence_link_input", {}).get("value")
-        try:
-            density = max(0, int(density_text))
-        except (ValueError, TypeError):
-            density = 0
-
         project = db_service.get_active_project(user_id)
         if not project:
             client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
             return
 
-        similar_title = db_service.find_similar_assumption(project["id"], title)
-        if similar_title:
-            messenger_service.post_ephemeral(
-                channel=user_id,
-                user=user_id,
-                text=f"⚠️ This looks similar to an existing assumption: “{similar_title}”.",
+        if "assumption_text" in values:
+            raw_text = values["assumption_text"]["assumption_text_input"]["value"]
+            extraction = ai_service.extract_structured_assumption(raw_text)
+            if extraction.get("error"):
+                extraction = {
+                    "title": raw_text.strip(),
+                    "category": ASSUMPTION_DEFAULT_CATEGORY,
+                    "confidence_score": 0,
+                }
+            title = extraction.get("title") or raw_text.strip()
+            category = extraction.get("category", ASSUMPTION_DEFAULT_CATEGORY)
+            confidence_score = extraction.get("confidence_score", 0)
+            similar_title = db_service.find_similar_assumption(project["id"], title)
+            if similar_title:
+                messenger_service.post_ephemeral(
+                    channel=user_id,
+                    user=user_id,
+                    text=f"⚠️ This looks similar to an existing assumption: “{similar_title}”.",
+                )
+            db_service.create_assumption(
+                project_id=project["id"],
+                data={
+                    "title": title,
+                    "category": category,
+                    "confidence_score": confidence_score,
+                    "owner_id": user_id,
+                },
             )
+        else:
+            title = values["assumption_title"]["title_input"]["value"]
+            category = values["assumption_category"]["assumption_category_select"]["selected_option"]["value"]
+            lane = values["assumption_lane"]["lane_input"]["selected_option"]["value"]
+            status = values["assumption_status"]["status_input"]["selected_option"]["value"]
+            density_text = values["assumption_density"]["density_input"]["value"]
+            evidence_link = values.get("assumption_evidence_link", {}).get("evidence_link_input", {}).get("value")
+            try:
+                density = max(0, int(density_text))
+            except (ValueError, TypeError):
+                density = 0
 
-        db_service.create_assumption(
-            project_id=project["id"],
-            data={
-                "title": title,
-                "category": category,
-                "evidence_link": evidence_link,
-                "lane": lane,
-                "validation_status": status,
-                "status": status,
-                "evidence_density": density,
-                "owner_id": user_id,
-            },
-        )
+            similar_title = db_service.find_similar_assumption(project["id"], title)
+            if similar_title:
+                messenger_service.post_ephemeral(
+                    channel=user_id,
+                    user=user_id,
+                    text=f"⚠️ This looks similar to an existing assumption: “{similar_title}”.",
+                )
+
+            db_service.create_assumption(
+                project_id=project["id"],
+                data={
+                    "title": title,
+                    "category": category,
+                    "evidence_link": evidence_link,
+                    "lane": lane,
+                    "validation_status": status,
+                    "status": status,
+                    "evidence_density": density,
+                    "owner_id": user_id,
+                },
+            )
         publish_home_tab_async(client, user_id, "roadmap:roadmap")
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to create assumption: %s", exc, exc_info=True)
@@ -4459,6 +4521,43 @@ def handle_assumption_overflow(ack, body, client, logger):  # noqa: ANN001
             client.chat_postEphemeral(channel=user_id, user=user_id, text="Action received.")
     except Exception as exc:  # noqa: BLE001
         logger.error("Overflow action failed", exc_info=True)
+
+
+@app.action("move_assumption")
+def handle_move_assumption(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    try:
+        assumption_id = body["actions"][0]["value"]
+        options = [
+            {"text": {"type": "plain_text", "text": "Now"}, "value": "Now"},
+            {"text": {"type": "plain_text", "text": "Next"}, "value": "Next"},
+            {"text": {"type": "plain_text", "text": "Later"}, "value": "Later"},
+        ]
+        client.views_open(
+            trigger_id=body["trigger_id"],
+            view={
+                "type": "modal",
+                "callback_id": "move_assumption_submit",
+                "private_metadata": assumption_id,
+                "title": {"type": "plain_text", "text": "Move Assumption"},
+                "submit": {"type": "plain_text", "text": "Move"},
+                "close": {"type": "plain_text", "text": "Cancel"},
+                "blocks": [
+                    {
+                        "type": "input",
+                        "block_id": "lane_block",
+                        "label": {"type": "plain_text", "text": "Select lane"},
+                        "element": {
+                            "type": "static_select",
+                            "action_id": "lane",
+                            "options": options,
+                        },
+                    }
+                ],
+            },
+        )
+    except (KeyError, ValueError, SlackApiError):
+        logger.error("Failed to open move assumption modal", exc_info=True)
 
 
 @app.view("move_assumption_submit")
