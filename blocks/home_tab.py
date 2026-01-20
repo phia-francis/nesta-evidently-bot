@@ -4,10 +4,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from blocks.ui_manager import UIManager
+from constants import LOW_CONFIDENCE_THRESHOLD, VALID_ASSUMPTION_CATEGORIES
 from services.playbook_service import PlaybookService
 
 
-_OCP_CATEGORIES = ("Opportunity", "Capability", "Progress")
+_OCP_CATEGORIES = VALID_ASSUMPTION_CATEGORIES
 _FLOW_STAGE_LABELS = {
     "audit": "Audit",
     "plan": "Plan",
@@ -16,8 +17,6 @@ _FLOW_STAGE_LABELS = {
 _MAX_TEXT_LENGTH = 2900
 _MAX_PROJECT_NAME_LENGTH_SLACK_UI = 75
 _STALE_ASSUMPTION_THRESHOLD_DAYS = 30
-_LOW_CONFIDENCE_THRESHOLD = 3
-
 
 def _truncate(text: str) -> str:
     if len(text) <= _MAX_TEXT_LENGTH:
@@ -66,7 +65,7 @@ def _confidence_label(confidence: int | None) -> tuple[str, bool]:
     score = confidence or 0
     score = max(0, min(5, int(score)))
     stars = "⭐" * score + "☆" * (5 - score)
-    is_low = 0 < score < _LOW_CONFIDENCE_THRESHOLD
+    is_low = 0 < score < LOW_CONFIDENCE_THRESHOLD
     return stars, is_low
 
 

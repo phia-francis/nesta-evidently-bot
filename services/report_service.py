@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
 
+from constants import LOW_CONFIDENCE_THRESHOLD
 from services.ai_service import EvidenceAI
 from services.db_service import DbService
 
@@ -100,7 +101,9 @@ class ReportService:
         experiments = project.get("experiments", [])
 
         if flow_stage == "audit":
-            low_confidence = [a for a in assumptions if (a.get("confidence_score") or 0) < 3]
+            low_confidence = [
+                a for a in assumptions if (a.get("confidence_score") or 0) < LOW_CONFIDENCE_THRESHOLD
+            ]
             focus_items = low_confidence or assumptions
             focus_lines = [
                 f"- {item.get('title', 'Untitled')} (Confidence {item.get('confidence_score', 0)}/5)"
@@ -117,7 +120,20 @@ class ReportService:
             )
 
         if flow_stage == "plan":
-            now_items = [a.get("title", "Untitled") for a in assumptions if (a.get("horizon") or "") == "now"]
+            def _normalise_horizon(value: str | None, lane: str | None) -> str:
+                raw_value = value or lane or ""
+                normalized = raw_value.strip().lower()
+                if normalized in {"now", "next", "later"}:
+                    return normalized
+                if raw_value in {"Now", "Next", "Later"}:
+                    return raw_value.lower()
+                return "now"
+
+            now_items = [
+                a.get("title", "Untitled")
+                for a in assumptions
+                if _normalise_horizon(a.get("horizon"), a.get("lane")) == "now"
+            ]
             now_lines = [f"- {item}" for item in now_items] or ["- No NOW items yet."]
             return "\n".join(
                 [

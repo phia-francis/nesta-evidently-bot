@@ -25,6 +25,7 @@ from slack_sdk.errors import SlackApiError
 from blocks.home_tab import get_home_view
 from blocks.ui_manager import UIManager
 from constants import (
+    ASSUMPTION_DEFAULT_CATEGORY,
     HELP_ANALYSIS,
     HELP_HEADER,
     HELP_INTERVIEW,
@@ -3301,11 +3302,11 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
             if extraction.get("error"):
                 extraction = {
                     "title": raw_text.strip(),
-                    "category": "Opportunity",
+                    "category": ASSUMPTION_DEFAULT_CATEGORY,
                     "confidence_score": 0,
                 }
             title = extraction.get("title") or raw_text.strip()
-            category = extraction.get("category", "Opportunity")
+            category = extraction.get("category", ASSUMPTION_DEFAULT_CATEGORY)
             confidence_score = extraction.get("confidence_score", 0)
             similar_title = db_service.find_similar_assumption(project["id"], title)
             if similar_title:
@@ -4555,7 +4556,7 @@ def handle_move_assumption(ack, body, client, logger):  # noqa: ANN001
                 ],
             },
         )
-    except Exception:  # noqa: BLE001
+    except (KeyError, ValueError, SlackApiError):
         logger.error("Failed to open move assumption modal", exc_info=True)
 
 

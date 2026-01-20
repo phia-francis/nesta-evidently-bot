@@ -29,14 +29,13 @@ from sqlalchemy.orm import Session, declarative_base, joinedload, relationship, 
 from cryptography.fernet import Fernet, InvalidToken
 
 from config import Config
+from constants import VALID_ASSUMPTION_CATEGORIES
 from services.toolkit_service import ToolkitService
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./evidently.db")
 
 ASSUMPTION_CATEGORY_ENUM = Enum(
-    "Opportunity",
-    "Capability",
-    "Progress",
+    *VALID_ASSUMPTION_CATEGORIES,
     name="assumption_category",
     native_enum=False,
 )
