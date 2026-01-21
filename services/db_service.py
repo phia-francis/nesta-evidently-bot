@@ -249,7 +249,13 @@ class RoadmapPlan(Base):
     plan_now = Column(Text)
     plan_next = Column(Text)
     plan_later = Column(Text)
-    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        default=dt.datetime.utcnow,
+        onupdate=dt.datetime.utcnow,
+    )
 
     project = relationship("Project", back_populates="roadmap_plans")
 
@@ -498,7 +504,7 @@ class DbService:
                                 plan_now TEXT,
                                 plan_next TEXT,
                                 plan_later TEXT,
-                                updated_at TIMESTAMP
+                                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                             );
                             """
                         )

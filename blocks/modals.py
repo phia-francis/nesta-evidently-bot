@@ -1,14 +1,10 @@
 import json
-import re
+from utils.diagnostic_utils import normalize_question_text, slugify
 
 
-def _slugify(value: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower())
-    return slug.strip("_")
-
-
-def build_diagnostic_block_id(pillar_key: str, sub_category: str, question_index: int) -> str:
-    return f"diagnostic__{_slugify(pillar_key)}__{_slugify(sub_category)}__{question_index}"
+def build_diagnostic_block_id(pillar_key: str, sub_category: str, question_text: str) -> str:
+    normalized_question = normalize_question_text(question_text)
+    return f"diagnostic__{slugify(pillar_key)}__{slugify(sub_category)}__{slugify(normalized_question)}"
 
 
 def _truncate_text(text: str, max_length: int) -> str:
@@ -135,8 +131,8 @@ def get_diagnostic_modal(
                 }
             )
             questions = sub_data.get("questions", [])
-            for question_index, question in enumerate(questions):
-                base_id = build_diagnostic_block_id(pillar_key, sub_category, question_index)
+            for question in questions:
+                base_id = build_diagnostic_block_id(pillar_key, sub_category, question)
                 ai_answer = ai_data.get(base_id, {})
                 initial_answer = str(ai_answer.get("answer", "")) if ai_answer else ""
                 initial_confidence = str(ai_answer.get("confidence", "")) if ai_answer else ""

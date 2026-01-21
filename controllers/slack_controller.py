@@ -689,10 +689,6 @@ def _get_plan_suggestion(project: dict) -> str | None:
     return f"💡 AI Suggestion: Move *{target.get('title', 'assumption')}* to *{horizon.upper()}* because {reason}."
 
 
-def _normalize_question_text(text: str) -> str:
-    return text.replace("•", "").strip().lower()
-
-
 def _build_diagnostic_question_map(
     framework: dict[str, dict[str, object]],
 ) -> dict[str, tuple[str, str, str]]:
@@ -701,10 +697,61 @@ def _build_diagnostic_question_map(
         sub_categories = pillar_data.get("sub_categories", {})
         for sub_category, sub_data in sub_categories.items():
             questions = sub_data.get("questions", [])
-            for question_index, question in enumerate(questions):
-                base_id = build_diagnostic_block_id(pillar_key, sub_category, question_index)
+            for question in questions:
+                base_id = build_diagnostic_block_id(pillar_key, sub_category, question)
                 question_map[base_id] = (pillar_key, sub_category, question)
     return question_map
+
+
+def _map_ai_response_to_diagnostic(
+    framework: dict[str, dict[str, object]],
+    ai_response: dict[str, Any],
+) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, dict[str, str]]]]:
+    pillar_lookup: dict[str, str] = {}
+    for pillar_key in framework.keys():
+        pillar_lookup[pillar_key.split(". ", 1)[-1].strip().lower()] = pillar_key
+        pillar_lookup[pillar_key.strip().lower()] = pillar_key
+
+    ai_data: dict[str, dict[str, object]] = {}
+    roadmap_data: dict[str, dict[str, dict[str, str]]] = {}
+
+    for pillar_name, pillar_payload in ai_response.items():
+        if not isinstance(pillar_payload, dict):
+            continue
+        pillar_key = pillar_lookup.get(str(pillar_name).strip().lower())
+        if not pillar_key:
+            continue
+        sub_categories = framework[pillar_key].get("sub_categories", {})
+        sub_category_lookup = {
+            sub_key.strip().lower(): sub_key for sub_key in sub_categories.keys()
+        }
+        for sub_name, sub_payload in pillar_payload.items():
+            if not isinstance(sub_payload, dict):
+                continue
+            sub_category_key = sub_category_lookup.get(str(sub_name).strip().lower())
+            if not sub_category_key:
+                continue
+            assumptions = sub_payload.get("assumptions", [])
+            if isinstance(assumptions, list):
+                for assumption in assumptions:
+                    if not isinstance(assumption, dict):
+                        continue
+                    question_text = str(assumption.get("question", "")).strip()
+                    if not question_text:
+                        continue
+                    base_id = build_diagnostic_block_id(pillar_key, sub_category_key, question_text)
+                    ai_data[base_id] = {
+                        "answer": str(assumption.get("answer", "")).strip(),
+                        "confidence": assumption.get("confidence", ""),
+                    }
+            roadmap_payload = sub_payload.get("roadmap", {})
+            if isinstance(roadmap_payload, dict):
+                roadmap_data.setdefault(pillar_key, {})[sub_category_key] = {
+                    "now": str(roadmap_payload.get("now", "")).strip(),
+                    "next": str(roadmap_payload.get("next", "")).strip(),
+                    "later": str(roadmap_payload.get("later", "")).strip(),
+                }
+    return ai_data, roadmap_data
 
 
 @app.action("action_open_diagnostic")
@@ -761,52 +808,7 @@ def autofill_diagnostic(ack, body, client, logger):  # noqa: ANN001
                 ),
             )
             return
-        question_map = _build_diagnostic_question_map(framework)
-        normalized_question_map = {
-            _normalize_question_text(question): base_id for base_id, (_, _, question) in question_map.items()
-        }
-        pillar_lookup = {}
-        for pillar_key in framework.keys():
-            pillar_lookup[pillar_key.split(". ", 1)[-1].strip().lower()] = pillar_key
-            pillar_lookup[pillar_key.strip().lower()] = pillar_key
-        ai_data: dict[str, dict[str, object]] = {}
-        roadmap_data: dict[str, dict[str, dict[str, str]]] = {}
-        for pillar_name, pillar_payload in ai_response.items():
-            if not isinstance(pillar_payload, dict):
-                continue
-            pillar_key = pillar_lookup.get(str(pillar_name).strip().lower())
-            if not pillar_key:
-                continue
-            sub_categories = framework[pillar_key].get("sub_categories", {})
-            sub_category_lookup = {
-                sub_key.strip().lower(): sub_key for sub_key in sub_categories.keys()
-            }
-            for sub_name, sub_payload in pillar_payload.items():
-                if not isinstance(sub_payload, dict):
-                    continue
-                sub_category_key = sub_category_lookup.get(str(sub_name).strip().lower())
-                if not sub_category_key:
-                    continue
-                assumptions = sub_payload.get("assumptions", [])
-                if isinstance(assumptions, list):
-                    for assumption in assumptions:
-                        if not isinstance(assumption, dict):
-                            continue
-                        question_text = str(assumption.get("question", "")).strip()
-                        base_id = normalized_question_map.get(_normalize_question_text(question_text))
-                        if not base_id:
-                            continue
-                        ai_data[base_id] = {
-                            "answer": str(assumption.get("answer", "")).strip(),
-                            "confidence": assumption.get("confidence", ""),
-                        }
-                roadmap_payload = sub_payload.get("roadmap", {})
-                if isinstance(roadmap_payload, dict):
-                    roadmap_data.setdefault(pillar_key, {})[sub_category_key] = {
-                        "now": str(roadmap_payload.get("now", "")).strip(),
-                        "next": str(roadmap_payload.get("next", "")).strip(),
-                        "later": str(roadmap_payload.get("later", "")).strip(),
-                    }
+        ai_data, roadmap_data = _map_ai_response_to_diagnostic(framework, ai_response)
         client.views_update(
             view_id=view_id,
             view=get_diagnostic_modal(
@@ -849,6 +851,7 @@ def action_save_diagnostic(ack, body, client, logger):  # noqa: ANN001
             if score is None:
                 continue
             answer = answers.get(lookup_key)
+            # 5-Pillar diagnostic answers are stored as generic assumptions to avoid overloading legacy categories.
             db_service.upsert_diagnostic_assumption(
                 project["id"],
                 ASSUMPTION_DEFAULT_CATEGORY,

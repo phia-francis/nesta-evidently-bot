@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("plan_now", sa.Text(), nullable=True),
         sa.Column("plan_next", sa.Text(), nullable=True),
         sa.Column("plan_later", sa.Text(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
     )
 
 

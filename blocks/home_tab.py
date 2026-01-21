@@ -6,6 +6,7 @@ from typing import Any
 from blocks.ui_manager import UIManager
 from constants import LOW_CONFIDENCE_THRESHOLD
 from services.playbook_service import PlaybookService
+from utils.diagnostic_utils import normalize_question_text
 
 
 _FLOW_STAGE_LABELS = {
@@ -153,10 +154,6 @@ def _normalise_horizon(value: str | None) -> str:
     if value in {"Now", "Next", "Later"}:
         return value.lower()
     return "now"
-
-
-def _normalize_question_text(text: str) -> str:
-    return text.replace("•", "").strip().lower()
 
 
 def _truncate_summary(text: str | None) -> str:
@@ -348,7 +345,7 @@ def get_home_view(
 
         framework = playbook_service.get_5_pillar_framework()
         assumptions_by_question = {
-            _normalize_question_text(item.get("title", "")): item for item in assumptions if item.get("title")
+            normalize_question_text(item.get("title", "")): item for item in assumptions if item.get("title")
         }
         roadmap_plans = {
             (plan.get("pillar"), plan.get("sub_category")): plan for plan in project.get("roadmap_plans", [])
@@ -382,7 +379,7 @@ def get_home_view(
                 )
                 questions = sub_data.get("questions", [])
                 for question in questions:
-                    normalized_question = _normalize_question_text(question)
+                    normalized_question = normalize_question_text(question)
                     assumption = assumptions_by_question.get(normalized_question)
                     answer = assumption.get("source_snippet") if assumption else None
                     answer_text = _truncate(answer) if answer else "_No answer yet._"
