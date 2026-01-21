@@ -1,3 +1,4 @@
+import logging
 import os
 from enum import Enum
 from dotenv import load_dotenv
@@ -6,6 +7,7 @@ load_dotenv()
 
 
 class Config:
+    ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
     SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
     SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET")
     SLACK_APP_TOKEN = os.environ.get("SLACK_APP_TOKEN")
@@ -19,7 +21,15 @@ class Config:
     # Standard Database URL (default to local SQLite for dev)
     DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./evidently.db")
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-    GOOGLE_TOKEN_ENCRYPTION_KEY = os.environ.get("GOOGLE_TOKEN_ENCRYPTION_KEY")
+    _google_token_encryption_key = os.environ.get("GOOGLE_TOKEN_ENCRYPTION_KEY")
+    if not _google_token_encryption_key:
+        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is not set.")
+        if ENVIRONMENT.lower() in {"development", "dev", "local"}:
+            GOOGLE_TOKEN_ENCRYPTION_KEY = "dev-placeholder-key"
+        else:
+            GOOGLE_TOKEN_ENCRYPTION_KEY = None
+    else:
+        GOOGLE_TOKEN_ENCRYPTION_KEY = _google_token_encryption_key
     OAUTH_STATE_TTL_SECONDS = int(os.environ.get("OAUTH_STATE_TTL_SECONDS", 600))
     PORT = int(os.environ.get("PORT", 10000))
     OAUTH_PORT = int(os.environ.get("OAUTH_PORT", 10001))

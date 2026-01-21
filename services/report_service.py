@@ -1,7 +1,6 @@
 import tempfile
 from pathlib import Path
 
-from constants import LOW_CONFIDENCE_THRESHOLD
 from services.ai_service import EvidenceAI
 from services.db_service import DbService
 
@@ -98,62 +97,37 @@ class ReportService:
             return "- Welcome & goals\n- Review project status\n- Agree next steps"
         flow_stage = (project.get("flow_stage") or "audit").lower()
         assumptions = project.get("assumptions", [])
-        experiments = project.get("experiments", [])
+        roadmap_plans = project.get("roadmap_plans", [])
 
         if flow_stage == "audit":
-            low_confidence = [
-                a for a in assumptions if (a.get("confidence_score") or 0) < LOW_CONFIDENCE_THRESHOLD
-            ]
-            focus_items = low_confidence or assumptions
-            focus_lines = [
-                f"- {item.get('title', 'Untitled')} (Confidence {item.get('confidence_score', 0)}/5)"
-                for item in focus_items
-            ] or ["- No assumptions logged yet."]
-            return "\n".join(
-                [
-                    "*Agenda Focus: Low Confidence Assumptions*",
-                    "- Quick recap of evidence gathered",
-                    "- Prioritise assumptions needing evidence",
-                    *focus_lines,
-                    "- Decide next evidence to collect",
-                ]
+            low_confidence = [a for a in assumptions if (a.get("confidence_score") or 0) <= 2]
+            sorted_items = sorted(low_confidence, key=lambda item: item.get("confidence_score") or 0)
+            top_items = [item.get("title", "Untitled") for item in sorted_items[:3]]
+            focus_list = ", ".join(top_items) if top_items else "no low-confidence assumptions yet"
+            return (
+                "🚨 Focus: Validation. We have low confidence in "
+                f"{focus_list}. Who can own these?"
             )
 
         if flow_stage == "plan":
-            def _normalise_horizon(value: str | None, lane: str | None) -> str:
-                raw_value = value or lane or ""
-                normalized = raw_value.strip().lower()
-                if normalized in {"now", "next", "later"}:
-                    return normalized
-                if raw_value in {"Now", "Next", "Later"}:
-                    return raw_value.lower()
-                return "now"
-
-            now_items = [
-                a.get("title", "Untitled")
-                for a in assumptions
-                if _normalise_horizon(a.get("horizon"), a.get("lane")) == "now"
+            now_plans = [
+                plan.get("plan_now", "").strip()
+                for plan in roadmap_plans
+                if plan.get("plan_now")
             ]
-            now_lines = [f"- {item}" for item in now_items] or ["- No NOW items yet."]
-            return "\n".join(
-                [
-                    "*Agenda Focus: Agreeing on the NOW column*",
-                    "- Review current roadmap horizons",
-                    "- Align on NOW items for validation",
-                    *now_lines,
-                    "- Assign owners and next moves",
-                ]
+            plan_list = ", ".join(item for item in now_plans if item) or "no immediate plans yet"
+            return (
+                "🗺️ Focus: Prioritization. We agreed to do "
+                f"{plan_list} immediately. Are we blocked?"
             )
 
-        experiment_lines = [
-            f"- {exp.get('title', 'Untitled')} ({exp.get('status', 'Planning')})"
-            for exp in experiments
-        ] or ["- No experiments logged yet."]
-        return "\n".join(
-            [
-                "*Agenda Focus: Reviewing Experiment Results*",
-                "- Review recent experiments and outcomes",
-                *experiment_lines,
-                "- Decide adjustments and next experiments",
-            ]
+        active_items = [
+            assumption.get("title", "Untitled")
+            for assumption in assumptions
+            if assumption.get("test_phase")
+        ]
+        active_list = ", ".join(active_items) if active_items else "no active experiments yet"
+        return (
+            "🧪 Focus: Results. Reviewing active experiments: "
+            f"{active_list}. What have we learned?"
         )

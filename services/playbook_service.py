@@ -30,7 +30,7 @@ FULL_5_PILLAR_FRAMEWORK = {
         "sub_categories": {
             "Market": {
                 "questions": [
-                    "• Size & Trends: What is the target market size? What realistic share can you take?",
+                    "• Size & Trends: What is the target market size?",
                     "• Barriers: What obstacles make it hard to enter?",
                     "• Competition: What competes with you?",
                 ],
@@ -38,11 +38,11 @@ FULL_5_PILLAR_FRAMEWORK = {
             },
             "Experience": {
                 "questions": [
-                    "• Discovery: What is the sales/marketing strategy?",
-                    "• Transaction: How will you price it?",
-                    "• User Experience: How will people use this over time?",
+                    "• Discovery: Sales/marketing strategy?",
+                    "• Transaction: Pricing & payment?",
+                    "• User Experience: Usage over time?",
                 ],
-                "roadmap_context": "What do we need to learn about the User Experience?",
+                "roadmap_context": "What do we need to learn about Experience?",
             },
         },
     },
@@ -51,17 +51,17 @@ FULL_5_PILLAR_FRAMEWORK = {
         "sub_categories": {
             "Finance": {
                 "questions": [
-                    "• Revenue & Cost: What are the targets? Costs?",
-                    "• Funding: What investment is available?",
-                    "• Cashflow: What is the budget?",
+                    "• Revenue & Cost?",
+                    "• Funding?",
+                    "• Cashflow?",
                 ],
                 "roadmap_context": "What do we need to learn about Finance?",
             },
             "IP": {
                 "questions": [
-                    "• New IP: Potential to create new IP?",
-                    "• Existing IP: What IP are you exploiting?",
-                    "• Licensing: Can licensing create value?",
+                    "• New IP?",
+                    "• Existing IP?",
+                    "• Licensing?",
                 ],
                 "roadmap_context": "What do we need to learn about IP?",
             },
@@ -72,26 +72,26 @@ FULL_5_PILLAR_FRAMEWORK = {
         "sub_categories": {
             "Risk": {
                 "questions": [
-                    "• Identify: What are the potential risks?",
-                    "• Assess: Likelihood and impact?",
-                    "• Mitigate: How will you manage it?",
-                    "• Performance: How will you measure success?",
+                    "• Identify Risks?",
+                    "• Assess Impact?",
+                    "• Mitigate?",
+                    "• Performance Metrics?",
                 ],
                 "roadmap_context": "What do we need to learn about Risks?",
             },
             "Rules": {
                 "questions": [
-                    "• Freedom to Operate: IP infringement?",
-                    "• Legislation: Regulations?",
-                    "• Standards: Ethical/social standards?",
+                    "• Freedom to Operate?",
+                    "• Legislation?",
+                    "• Standards?",
                 ],
-                "roadmap_context": "What do we need to learn about Rules/Compliance?",
+                "roadmap_context": "What do we need to learn about Rules?",
             },
             "Wider Impact": {
                 "questions": [
-                    "• Economic: Wider economic impacts?",
-                    "• Social: Social impacts?",
-                    "• Environmental: Environmental impacts?",
+                    "• Economic?",
+                    "• Social?",
+                    "• Environmental?",
                 ],
                 "roadmap_context": "What do we need to learn about Wider Impact?",
             },
@@ -102,26 +102,26 @@ FULL_5_PILLAR_FRAMEWORK = {
         "sub_categories": {
             "R&D": {
                 "questions": [
-                    "• Ideas: Process to generate ideas?",
-                    "• Design: Prototyping capabilities?",
-                    "• Technology: Scientific/technical challenges?",
+                    "• Idea Generation?",
+                    "• Prototyping Capabilities?",
+                    "• Technical Challenges?",
                 ],
                 "roadmap_context": "What do we need to learn about R&D?",
             },
             "Operations": {
                 "questions": [
-                    "• Skills & People: Expertise required?",
-                    "• Equipment: Facilities available?",
-                    "• Collaboration: In-house vs outsourced?",
-                    "• Relations: Stakeholder management?",
+                    "• Skills/People?",
+                    "• Equipment?",
+                    "• Outsourcing?",
+                    "• Stakeholders?",
                 ],
                 "roadmap_context": "What do we need to learn about Operations?",
             },
             "Leadership": {
                 "questions": [
-                    "• Champions: Passion/influence?",
-                    "• Management: Team expertise?",
-                    "• Strategy: Contribution to wider plan?",
+                    "• Champions?",
+                    "• Management Expertise?",
+                    "• Strategy?",
                 ],
                 "roadmap_context": "What do we need to learn about Leadership?",
             },
