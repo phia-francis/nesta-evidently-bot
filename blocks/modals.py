@@ -1,4 +1,14 @@
-_MAX_ROADMAP_MODAL_TITLE_LENGTH = 75
+import json
+import re
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", value.strip().lower())
+    return slug.strip("_")
+
+
+def build_diagnostic_block_id(pillar_key: str, sub_category: str, question_index: int) -> str:
+    return f"diagnostic__{_slugify(pillar_key)}__{_slugify(sub_category)}__{question_index}"
 
 
 def _truncate_text(text: str, max_length: int) -> str:
@@ -70,10 +80,11 @@ def open_log_assumption_modal(ai_data: dict | None = None) -> dict:
 
 
 def get_diagnostic_modal(
-    ocp_questions: dict[str, dict[str, str]],
+    framework: dict[str, dict[str, object]],
     project_id: int,
     ai_data: dict[str, dict[str, object]] | None = None,
     status_message: str | None = None,
+    private_metadata: dict | str | None = None,
 ) -> dict:
     options = [{"text": {"type": "plain_text", "text": str(i)}, "value": str(i)} for i in range(1, 6)]
 
@@ -83,7 +94,7 @@ def get_diagnostic_modal(
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": "Rate confidence (1 = low, 5 = high) for each OCP diagnostic question.",
+                "text": "Rate confidence (1 = low, 5 = high) for each diagnostic question.",
             },
         },
         {
@@ -108,51 +119,64 @@ def get_diagnostic_modal(
             },
         )
 
-    for category, questions in ocp_questions.items():
+    for pillar_key, pillar_data in framework.items():
         blocks.append(
             {
                 "type": "section",
-                "text": {"type": "mrkdwn", "text": f"*{category}*"},
+                "text": {"type": "mrkdwn", "text": f"*{pillar_key}*"},
             }
         )
-        for key, question in questions.items():
-            ai_key = f"{category.lower()}_{key.lower()}"
-            ai_answer = ai_data.get(ai_key, {})
-            initial_answer = str(ai_answer.get("answer", "")) if ai_answer else ""
-            initial_confidence = str(ai_answer.get("confidence", "")) if ai_answer else ""
-            initial_option = next((option for option in options if option["value"] == initial_confidence), None)
+        sub_categories = pillar_data.get("sub_categories", {})
+        for sub_category, sub_data in sub_categories.items():
             blocks.append(
                 {
-                    "type": "input",
-                    "block_id": f"ocp_answer__{category.lower()}__{key.lower()}",
-                    "label": {"type": "plain_text", "text": question},
-                    "element": {
-                        "type": "plain_text_input",
-                        "action_id": "answer",
-                        "multiline": True,
-                        "initial_value": initial_answer,
-                    },
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": f"*{sub_category}*"}],
                 }
             )
-            blocks.append(
-                {
-                    "type": "input",
-                    "block_id": f"ocp_confidence__{category.lower()}__{key.lower()}",
-                    "label": {"type": "plain_text", "text": "Confidence (1-5)"},
-                    "element": {
-                        "type": "static_select",
-                        "action_id": "confidence_score",
-                        "options": options,
-                        "initial_option": initial_option,
-                    },
-                }
-            )
+            questions = sub_data.get("questions", [])
+            for question_index, question in enumerate(questions):
+                base_id = build_diagnostic_block_id(pillar_key, sub_category, question_index)
+                ai_answer = ai_data.get(base_id, {})
+                initial_answer = str(ai_answer.get("answer", "")) if ai_answer else ""
+                initial_confidence = str(ai_answer.get("confidence", "")) if ai_answer else ""
+                initial_option = next((option for option in options if option["value"] == initial_confidence), None)
+                blocks.append(
+                    {
+                        "type": "input",
+                        "block_id": f"diagnostic_answer__{base_id}",
+                        "label": {"type": "plain_text", "text": question},
+                        "element": {
+                            "type": "plain_text_input",
+                            "action_id": "answer",
+                            "multiline": True,
+                            "initial_value": initial_answer,
+                        },
+                    }
+                )
+                blocks.append(
+                    {
+                        "type": "input",
+                        "block_id": f"diagnostic_confidence__{base_id}",
+                        "label": {"type": "plain_text", "text": "Confidence (1-5)"},
+                        "element": {
+                            "type": "static_select",
+                            "action_id": "confidence_score",
+                            "options": options,
+                            "initial_option": initial_option,
+                        },
+                    }
+                )
         blocks.append({"type": "divider"})
 
+    if private_metadata is None:
+        private_metadata = str(project_id)
+    if isinstance(private_metadata, dict):
+        private_metadata = json.dumps(private_metadata)
     return {
         "type": "modal",
         "callback_id": "action_save_diagnostic",
-        "private_metadata": str(project_id),
+        "private_metadata": private_metadata,
         "title": {"type": "plain_text", "text": "Run Diagnostic"},
         "submit": {"type": "plain_text", "text": "Save"},
         "close": {"type": "plain_text", "text": "Cancel"},
@@ -200,52 +224,59 @@ def get_new_project_modal() -> dict:
     }
 
 
-def get_roadmap_modal(assumptions: list[dict]) -> dict:
-    assumption_options = [
-        {
-            "text": {
-                "type": "plain_text",
-                "text": _truncate_text(item.get("title", "Untitled"), _MAX_ROADMAP_MODAL_TITLE_LENGTH),
-            },
-            "value": str(item["id"]),
-        }
-        for item in assumptions
-    ]
-    horizon_options = [
-        {"text": {"type": "plain_text", "text": "Now"}, "value": "now"},
-        {"text": {"type": "plain_text", "text": "Next"}, "value": "next"},
-        {"text": {"type": "plain_text", "text": "Later"}, "value": "later"},
-    ]
-    initial_assumption = assumption_options[0] if assumption_options else None
-    initial_horizon = horizon_options[0]
+def get_roadmap_modal(
+    pillar: str,
+    sub_category: str,
+    roadmap_plan: dict | None = None,
+    project_id: int | None = None,
+) -> dict:
+    roadmap_plan = roadmap_plan or {}
+    pillar_label = pillar.split(". ", 1)[-1].title()
+    plan_context = f"Planning for: {pillar_label} → {sub_category}"
+    metadata = {"pillar": pillar, "sub_category": sub_category}
+    if project_id is not None:
+        metadata["project_id"] = project_id
 
     return {
         "type": "modal",
-        "callback_id": "save_roadmap_horizon",
-        "title": {"type": "plain_text", "text": "Update Roadmap"},
+        "callback_id": "save_roadmap_plan",
+        "private_metadata": json.dumps(metadata),
+        "title": {"type": "plain_text", "text": "Edit Roadmap"},
         "submit": {"type": "plain_text", "text": "Save"},
         "close": {"type": "plain_text", "text": "Cancel"},
         "blocks": [
+            {"type": "section", "text": {"type": "mrkdwn", "text": plan_context}},
             {
                 "type": "input",
-                "block_id": "roadmap_assumption_select",
-                "label": {"type": "plain_text", "text": "Select assumption"},
+                "block_id": "roadmap_plan_now",
+                "label": {"type": "plain_text", "text": "NOW (Learning & Testing Plan)"},
                 "element": {
-                    "type": "static_select",
-                    "action_id": "assumption_id",
-                    "options": assumption_options,
-                    "initial_option": initial_assumption,
+                    "type": "plain_text_input",
+                    "action_id": "plan_now",
+                    "multiline": True,
+                    "initial_value": _truncate_text(roadmap_plan.get("plan_now", "") or "", 2900),
                 },
             },
             {
                 "type": "input",
-                "block_id": "roadmap_horizon_select",
-                "label": {"type": "plain_text", "text": "Move to horizon"},
+                "block_id": "roadmap_plan_next",
+                "label": {"type": "plain_text", "text": "NEXT (Growth Validation)"},
                 "element": {
-                    "type": "static_select",
-                    "action_id": "horizon",
-                    "options": horizon_options,
-                    "initial_option": initial_horizon,
+                    "type": "plain_text_input",
+                    "action_id": "plan_next",
+                    "multiline": True,
+                    "initial_value": _truncate_text(roadmap_plan.get("plan_next", "") or "", 2900),
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "roadmap_plan_later",
+                "label": {"type": "plain_text", "text": "LATER (Scale Validation)"},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "plan_later",
+                    "multiline": True,
+                    "initial_value": _truncate_text(roadmap_plan.get("plan_later", "") or "", 2900),
                 },
             },
         ],
