@@ -225,6 +225,47 @@ Return JSON: { "opportunity_needs": {"answer": "...", "confidence": 3}, ... }
             logger.error("AI OCP Analysis - General failure", exc_info=True)
             return {"error": f"Could not analyse OCP context: {exc}"}
 
+    def extract_5_pillar_diagnostic(self, context_text: str) -> dict:
+        if not context_text:
+            return {"error": "Missing project context."}
+        prompt = """
+Analyze the project context.
+1. Extract granular assumptions for specific diagnostic questions (e.g., "Who is the user?").
+2. Extract HIGH-LEVEL strategic plans for the Sub-Categories (e.g., "Value -> Needs").
+
+Return JSON:
+{
+  "Value": {
+    "Needs": {
+       "assumptions": [
+          {"question": "Who is the user?", "answer": "...", "confidence": 3}
+       ],
+       "roadmap": {
+          "now": "Interview 5 parents",
+          "next": "Beta launch",
+          "later": "National rollout"
+       }
+    }
+  }
+}
+"""
+        try:
+            response = self.model.generate_content(
+                f"{prompt}\nProject context:\n{self._wrap_user_input(self.redact_pii(context_text))}",
+                generation_config={"temperature": _TEMPERATURE},
+            )
+            parsed = self._parse_json_with_retry(
+                response.text,
+                retry_prompt=f"{prompt}\nReturn only valid JSON. No markdown or commentary.",
+            )
+            return parsed if isinstance(parsed, dict) else {"error": "Invalid AI response."}
+        except json.JSONDecodeError as exc:
+            logger.error("AI 5-Pillar Diagnostic - Failed to parse JSON", exc_info=True)
+            return {"error": f"Could not analyse 5-pillar diagnostic: {exc}"}
+        except Exception as exc:  # noqa: BLE001
+            logger.error("AI 5-Pillar Diagnostic - General failure", exc_info=True)
+            return {"error": f"Could not analyse 5-pillar diagnostic: {exc}"}
+
     def suggest_roadmap_horizon(self, assumption_text: str) -> dict:
         if not assumption_text:
             return {"error": "Missing assumption text."}

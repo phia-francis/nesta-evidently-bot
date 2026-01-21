@@ -49,6 +49,7 @@ from blocks.nesta_ui import NestaUI
 from blocks.onboarding import get_setup_step_1_modal, get_setup_step_2_modal
 from blocks.modals import (
     add_canvas_item_modal,
+    build_diagnostic_block_id,
     change_stage_modal,
     create_channel_modal,
     experiment_modal,
@@ -688,6 +689,71 @@ def _get_plan_suggestion(project: dict) -> str | None:
     return f"💡 AI Suggestion: Move *{target.get('title', 'assumption')}* to *{horizon.upper()}* because {reason}."
 
 
+def _build_diagnostic_question_map(
+    framework: dict[str, dict[str, object]],
+) -> dict[str, tuple[str, str, str]]:
+    question_map: dict[str, tuple[str, str, str]] = {}
+    for pillar_key, pillar_data in framework.items():
+        sub_categories = pillar_data.get("sub_categories", {})
+        for sub_category, sub_data in sub_categories.items():
+            questions = sub_data.get("questions", [])
+            for question in questions:
+                base_id = build_diagnostic_block_id(pillar_key, sub_category, question)
+                question_map[base_id] = (pillar_key, sub_category, question)
+    return question_map
+
+
+def _map_ai_response_to_diagnostic(
+    framework: dict[str, dict[str, object]],
+    ai_response: dict[str, Any],
+) -> tuple[dict[str, dict[str, object]], dict[str, dict[str, dict[str, str]]]]:
+    pillar_lookup: dict[str, str] = {}
+    for pillar_key in framework.keys():
+        pillar_lookup[pillar_key.split(". ", 1)[-1].strip().lower()] = pillar_key
+        pillar_lookup[pillar_key.strip().lower()] = pillar_key
+
+    ai_data: dict[str, dict[str, object]] = {}
+    roadmap_data: dict[str, dict[str, dict[str, str]]] = {}
+
+    for pillar_name, pillar_payload in ai_response.items():
+        if not isinstance(pillar_payload, dict):
+            continue
+        pillar_key = pillar_lookup.get(str(pillar_name).strip().lower())
+        if not pillar_key:
+            continue
+        sub_categories = framework[pillar_key].get("sub_categories", {})
+        sub_category_lookup = {
+            sub_key.strip().lower(): sub_key for sub_key in sub_categories.keys()
+        }
+        for sub_name, sub_payload in pillar_payload.items():
+            if not isinstance(sub_payload, dict):
+                continue
+            sub_category_key = sub_category_lookup.get(str(sub_name).strip().lower())
+            if not sub_category_key:
+                continue
+            assumptions = sub_payload.get("assumptions", [])
+            if isinstance(assumptions, list):
+                for assumption in assumptions:
+                    if not isinstance(assumption, dict):
+                        continue
+                    question_text = str(assumption.get("question", "")).strip()
+                    if not question_text:
+                        continue
+                    base_id = build_diagnostic_block_id(pillar_key, sub_category_key, question_text)
+                    ai_data[base_id] = {
+                        "answer": str(assumption.get("answer", "")).strip(),
+                        "confidence": assumption.get("confidence", ""),
+                    }
+            roadmap_payload = sub_payload.get("roadmap", {})
+            if isinstance(roadmap_payload, dict):
+                roadmap_data.setdefault(pillar_key, {})[sub_category_key] = {
+                    "now": str(roadmap_payload.get("now", "")).strip(),
+                    "next": str(roadmap_payload.get("next", "")).strip(),
+                    "later": str(roadmap_payload.get("later", "")).strip(),
+                }
+    return ai_data, roadmap_data
+
+
 @app.action("action_open_diagnostic")
 def action_open_diagnostic(ack, body, client):  # noqa: ANN001
     ack()
@@ -696,10 +762,10 @@ def action_open_diagnostic(ack, body, client):  # noqa: ANN001
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
         return
-    ocp_questions = playbook.get_ocp_questions()
+    framework = playbook.get_5_pillar_framework()
     client.views_open(
         trigger_id=body["trigger_id"],
-        view=get_diagnostic_modal(ocp_questions, project_id=project["id"]),
+        view=get_diagnostic_modal(framework, project_id=project["id"]),
     )
 
 
@@ -709,44 +775,48 @@ def autofill_diagnostic(ack, body, client, logger):  # noqa: ANN001
     view = body.get("view", {})
     view_id = view.get("id")
     project_id = view.get("private_metadata") or body["actions"][0].get("value")
+    if isinstance(project_id, str) and project_id.startswith("{"):
+        try:
+            metadata_payload = json.loads(project_id)
+            if isinstance(metadata_payload, dict):
+                project_id = metadata_payload.get("project_id")
+        except json.JSONDecodeError:
+            project_id = None
     if not view_id or not project_id:
         return
     try:
         context_text = ingestion_service.ingest_project_files(int(project_id))
-        ocp_questions = playbook.get_ocp_questions()
+        framework = playbook.get_5_pillar_framework()
         if not context_text:
             client.views_update(
                 view_id=view_id,
                 view=get_diagnostic_modal(
-                    ocp_questions,
+                    framework,
                     project_id=int(project_id),
                     status_message="⚠️ No connected evidence found. Add files to auto-fill.",
                 ),
             )
             return
-        ai_response = ai_service.analyze_for_ocp(context_text)
-        if ai_response.get("error"):
+        ai_response = ai_service.extract_5_pillar_diagnostic(context_text)
+        if not isinstance(ai_response, dict) or ai_response.get("error"):
             client.views_update(
                 view_id=view_id,
                 view=get_diagnostic_modal(
-                    ocp_questions,
+                    framework,
                     project_id=int(project_id),
                     status_message="⚠️ Unable to auto-fill from AI right now.",
                 ),
             )
             return
-        formatted: dict[str, dict[str, object]] = {}
-        for key, value in ai_response.items():
-            if not isinstance(value, dict):
-                continue
-            formatted[key] = value
+        ai_data, roadmap_data = _map_ai_response_to_diagnostic(framework, ai_response)
         client.views_update(
             view_id=view_id,
             view=get_diagnostic_modal(
-                ocp_questions,
+                framework,
                 project_id=int(project_id),
-                ai_data=formatted,
+                ai_data=ai_data,
                 status_message="✨ Auto-filled from connected evidence.",
+                private_metadata={"project_id": int(project_id), "ai_roadmap": roadmap_data},
             ),
         )
     except Exception as exc:  # noqa: BLE001
@@ -763,29 +833,55 @@ def action_save_diagnostic(ack, body, client, logger):  # noqa: ANN001
         return
     values = body["view"]["state"]["values"]
     try:
-        ocp_questions = playbook.get_ocp_questions()
-        question_lookup = {
-            f"{category.lower()}__{key.lower()}": (category, question)
-            for category, questions in ocp_questions.items()
-            for key, question in questions.items()
-        }
+        framework = playbook.get_5_pillar_framework()
+        question_map = _build_diagnostic_question_map(framework)
         answers: dict[str, str] = {}
         confidences: dict[str, int] = {}
         for block_id, block_values in values.items():
-            if block_id.startswith("ocp_answer__"):
-                lookup_key = block_id.replace("ocp_answer__", "")
+            if block_id.startswith("diagnostic_answer__"):
+                lookup_key = block_id.replace("diagnostic_answer__", "")
                 answers[lookup_key] = block_values.get("answer", {}).get("value", "").strip()
-            if block_id.startswith("ocp_confidence__"):
-                lookup_key = block_id.replace("ocp_confidence__", "")
+            if block_id.startswith("diagnostic_confidence__"):
+                lookup_key = block_id.replace("diagnostic_confidence__", "")
                 selection = block_values.get("confidence_score", {}).get("selected_option")
                 if selection:
                     confidences[lookup_key] = int(selection["value"])
-        for lookup_key, (category, question) in question_lookup.items():
+        for lookup_key, (_, _, question) in question_map.items():
             score = confidences.get(lookup_key)
             if score is None:
                 continue
             answer = answers.get(lookup_key)
-            db_service.upsert_diagnostic_assumption(project["id"], category, question, score, answer=answer)
+            # 5-Pillar diagnostic answers are stored as generic assumptions to avoid overloading legacy categories.
+            db_service.upsert_diagnostic_assumption(
+                project["id"],
+                ASSUMPTION_DEFAULT_CATEGORY,
+                question,
+                score,
+                answer=answer,
+            )
+        metadata = body["view"].get("private_metadata") or ""
+        try:
+            metadata_payload = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata_payload = {}
+        if not isinstance(metadata_payload, dict):
+            metadata_payload = {}
+        roadmap_payload = metadata_payload.get("ai_roadmap", {})
+        if isinstance(roadmap_payload, dict):
+            for pillar, subcategories in roadmap_payload.items():
+                if not isinstance(subcategories, dict):
+                    continue
+                for sub_category, plans in subcategories.items():
+                    if not isinstance(plans, dict):
+                        continue
+                    db_service.upsert_roadmap_plan(
+                        project["id"],
+                        pillar,
+                        sub_category,
+                        plans.get("now"),
+                        plans.get("next"),
+                        plans.get("later"),
+                    )
         publish_home_tab_async(client, user_id, "overview")
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to save audit scores: %s", exc, exc_info=True)
@@ -799,11 +895,21 @@ def open_roadmap_modal(ack, body, client):  # noqa: ANN001
     if not project:
         client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
         return
-    assumptions = project.get("assumptions", [])
-    if not assumptions:
-        client.chat_postEphemeral(channel=user_id, user=user_id, text="Add assumptions before updating the roadmap.")
+    raw_value = body["actions"][0].get("value", "")
+    if "||" not in raw_value:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Select a roadmap section to edit.")
         return
-    client.views_open(trigger_id=body["trigger_id"], view=get_roadmap_modal(assumptions))
+    pillar, sub_category = raw_value.split("||", 1)
+    existing_plan = db_service.get_roadmap_plan(project["id"], pillar, sub_category)
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view=get_roadmap_modal(
+            pillar=pillar,
+            sub_category=sub_category,
+            roadmap_plan=existing_plan,
+            project_id=project["id"],
+        ),
+    )
 
 
 @app.action("open_decision_vote")
@@ -827,18 +933,33 @@ def open_decision_vote(ack, body, client):  # noqa: ANN001
     )
 
 
-@app.view("save_roadmap_horizon")
-def save_roadmap_horizon(ack, body, client, logger):  # noqa: ANN001
+@app.view("save_roadmap_plan")
+def save_roadmap_plan(ack, body, client, logger):  # noqa: ANN001
     ack()
     user_id = body["user"]["id"]
     values = body["view"]["state"]["values"]
     try:
-        assumption_value = values["roadmap_assumption_select"]["assumption_id"]["selected_option"]["value"]
-        horizon_value = values["roadmap_horizon_select"]["horizon"]["selected_option"]["value"]
-        db_service.update_assumption_horizon(int(assumption_value), horizon_value)
+        metadata = json.loads(body["view"].get("private_metadata") or "{}")
+        pillar = metadata.get("pillar")
+        sub_category = metadata.get("sub_category")
+        project_id = metadata.get("project_id")
+        if not (pillar and sub_category and project_id):
+            client.chat_postEphemeral(channel=user_id, user=user_id, text="Missing roadmap context.")
+            return
+        plan_now = values["roadmap_plan_now"]["plan_now"].get("value", "").strip()
+        plan_next = values["roadmap_plan_next"]["plan_next"].get("value", "").strip()
+        plan_later = values["roadmap_plan_later"]["plan_later"].get("value", "").strip()
+        db_service.upsert_roadmap_plan(
+            int(project_id),
+            pillar,
+            sub_category,
+            plan_now,
+            plan_next,
+            plan_later,
+        )
         publish_home_tab_async(client, user_id, "overview")
     except Exception as exc:  # noqa: BLE001
-        logger.error("Failed to update roadmap horizon: %s", exc, exc_info=True)
+        logger.error("Failed to update roadmap plan: %s", exc, exc_info=True)
 
 
 @app.action("view_playbook_methods")

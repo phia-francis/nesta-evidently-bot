@@ -4,11 +4,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from blocks.ui_manager import UIManager
-from constants import LOW_CONFIDENCE_THRESHOLD, VALID_ASSUMPTION_CATEGORIES
+from constants import LOW_CONFIDENCE_THRESHOLD
 from services.playbook_service import PlaybookService
+from utils.diagnostic_utils import normalize_question_text
 
 
-_OCP_CATEGORIES = VALID_ASSUMPTION_CATEGORIES
 _FLOW_STAGE_LABELS = {
     "audit": "Audit",
     "plan": "Plan",
@@ -17,6 +17,8 @@ _FLOW_STAGE_LABELS = {
 _MAX_TEXT_LENGTH = 2900
 _MAX_PROJECT_NAME_LENGTH_SLACK_UI = 75
 _STALE_ASSUMPTION_THRESHOLD_DAYS = 30
+
+_ROADMAP_SUMMARY_LENGTH = 120
 
 def _truncate(text: str) -> str:
     if len(text) <= _MAX_TEXT_LENGTH:
@@ -143,12 +145,6 @@ def _action_assumption_blocks(assumption: dict[str, Any]) -> list[dict[str, Any]
     ]
 
 
-def _normalise_category(value: str | None) -> str:
-    if value in _OCP_CATEGORIES:
-        return value
-    return "Opportunity"
-
-
 def _normalise_horizon(value: str | None) -> str:
     if not value:
         return "now"
@@ -158,6 +154,14 @@ def _normalise_horizon(value: str | None) -> str:
     if value in {"Now", "Next", "Later"}:
         return value.lower()
     return "now"
+
+
+def _truncate_summary(text: str | None) -> str:
+    if not text:
+        return "Not set"
+    if len(text) <= _ROADMAP_SUMMARY_LENGTH:
+        return text
+    return text[: _ROADMAP_SUMMARY_LENGTH - 3] + "..."
 
 
 def _get_current_phase(assumptions: list[dict[str, Any]]) -> str:
@@ -322,7 +326,7 @@ def get_home_view(
                     "elements": [
                         {
                             "type": "mrkdwn",
-                            "text": f"*OCP Dashboard* · Health Score: {health_score}% ({validated_count}/{total_assumptions} validated)",
+                            "text": f"*5-Pillar Diagnostic* · Health Score: {health_score}% ({validated_count}/{total_assumptions} validated)",
                         }
                     ],
                 },
@@ -339,28 +343,56 @@ def get_home_view(
             ]
         )
 
-        for category in _OCP_CATEGORIES:
+        framework = playbook_service.get_5_pillar_framework()
+        assumptions_by_question = {
+            normalize_question_text(item.get("title", "")): item for item in assumptions if item.get("title")
+        }
+        roadmap_plans = {
+            (plan.get("pillar"), plan.get("sub_category")): plan for plan in project.get("roadmap_plans", [])
+        }
+
+        for pillar_index, (pillar_key, pillar_data) in enumerate(framework.items(), start=1):
             blocks.append(
                 {
-                    "type": "section",
-                    "text": {"type": "mrkdwn", "text": f"*{category}*"},
+                    "type": "header",
+                    "text": {"type": "plain_text", "text": pillar_key},
                 }
             )
-            category_items = [
-                assumption
-                for assumption in assumptions
-                if _normalise_category(assumption.get("category")) == category
-            ]
-            if not category_items:
+            sub_categories = pillar_data.get("sub_categories", {})
+            for sub_index, (sub_category, sub_data) in enumerate(sub_categories.items(), start=1):
+                header_label = f"{pillar_index}.{sub_index} {sub_category}"
+                plan = roadmap_plans.get((pillar_key, sub_category), {})
+                now_summary = _truncate_summary(plan.get("plan_now"))
                 blocks.append(
                     {
-                        "type": "context",
-                        "elements": [{"type": "mrkdwn", "text": "_No assumptions yet._"}],
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"*{header_label}* · Now: {now_summary}",
+                        },
+                        "accessory": _safe_button(
+                            "Edit Roadmap",
+                            "open_roadmap_modal",
+                            value=f"{pillar_key}||{sub_category}",
+                        ),
                     }
                 )
-            else:
-                blocks.extend(_assumption_section(item, highlight_low_confidence=True) for item in category_items)
-            blocks.append({"type": "divider"})
+                questions = sub_data.get("questions", [])
+                for question in questions:
+                    normalized_question = normalize_question_text(question)
+                    assumption = assumptions_by_question.get(normalized_question)
+                    answer = assumption.get("source_snippet") if assumption else None
+                    answer_text = _truncate(answer) if answer else "_No answer yet._"
+                    blocks.append(
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"*{question}*\n{answer_text}",
+                            },
+                        }
+                    )
+                blocks.append({"type": "divider"})
 
     elif flow_stage == "plan":
         blocks.extend(
@@ -377,7 +409,6 @@ def get_home_view(
                 {
                     "type": "actions",
                     "elements": [
-                        _safe_button("📍 Update Roadmap", "open_roadmap_modal", style="primary"),
                         _safe_button("➕ Add Assumption", "open_add_assumption"),
                         _safe_button("🔄 Refresh", "refresh_home"),
                     ],

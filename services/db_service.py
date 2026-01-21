@@ -133,6 +133,7 @@ class Project(Base):
     decisions = relationship("DecisionSession", back_populates="project")
     collections = relationship("Collection", back_populates="project", cascade="all, delete-orphan")
     automation_rules = relationship("AutomationRule", back_populates="project", cascade="all, delete-orphan")
+    roadmap_plans = relationship("RoadmapPlan", back_populates="project", cascade="all, delete-orphan")
 
 
 class ProjectMember(Base):
@@ -236,6 +237,27 @@ class Assumption(Base):
     scores = relationship("DecisionScore", back_populates="assumption")
     experiments = relationship("Experiment", back_populates="assumption")
     decisions = relationship("DecisionVote", back_populates="assumption")
+
+
+class RoadmapPlan(Base):
+    __tablename__ = "roadmap_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    pillar = Column(String(50))
+    sub_category = Column(String(100))
+    plan_now = Column(Text)
+    plan_next = Column(Text)
+    plan_later = Column(Text)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+        default=dt.datetime.utcnow,
+        onupdate=dt.datetime.utcnow,
+    )
+
+    project = relationship("Project", back_populates="roadmap_plans")
 
 
 class DecisionVote(Base):
@@ -384,6 +406,7 @@ class DbService:
             "canvas_items": {"section", "text", "ai_generated"},
             "experiments": {"outcome", "assumption_id", "kpi_target", "kpi_actual"},
             "decisions": {"assumption_id", "impact", "uncertainty", "user_id"},
+            "roadmap_plans": {"pillar", "sub_category", "plan_now", "plan_next", "plan_later", "updated_at"},
         }
         missing = []
         for table, required_cols in expected_tables.items():
@@ -464,6 +487,24 @@ class DbService:
                                 impact INTEGER,
                                 uncertainty INTEGER,
                                 created_at TIMESTAMP
+                            );
+                            """
+                        )
+                    )
+
+                    # --- 5. Add ROADMAP_PLANS Table ---
+                    connection.execute(
+                        text(
+                            """
+                            CREATE TABLE IF NOT EXISTS roadmap_plans (
+                                id INTEGER PRIMARY KEY,
+                                project_id INTEGER,
+                                pillar VARCHAR(50),
+                                sub_category VARCHAR(100),
+                                plan_now TEXT,
+                                plan_next TEXT,
+                                plan_later TEXT,
+                                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                             );
                             """
                         )
@@ -561,6 +602,7 @@ class DbService:
                     joinedload(Project.experiments),
                     joinedload(Project.members),
                     joinedload(Project.canvas_items),
+                    joinedload(Project.roadmap_plans),
                 )
                 .filter(Project.id == project_id)
                 .first()
@@ -576,6 +618,7 @@ class DbService:
                     joinedload(Project.experiments),
                     joinedload(Project.members),
                     joinedload(Project.canvas_items),
+                    joinedload(Project.roadmap_plans),
                 )
                 .filter(Project.status == "active")
                 .all()
@@ -1270,6 +1313,56 @@ class DbService:
             db.refresh(assumption)
             return assumption
 
+    def get_roadmap_plan(self, project_id: int, pillar: str, sub_category: str) -> Optional[Dict[str, Any]]:
+        with SessionLocal() as db:
+            plan = (
+                db.query(RoadmapPlan)
+                .filter(
+                    RoadmapPlan.project_id == project_id,
+                    RoadmapPlan.pillar == pillar,
+                    RoadmapPlan.sub_category == sub_category,
+                )
+                .first()
+            )
+            return self._serialize_roadmap_plan(plan) if plan else None
+
+    def upsert_roadmap_plan(
+        self,
+        project_id: int,
+        pillar: str,
+        sub_category: str,
+        plan_now: str | None,
+        plan_next: str | None,
+        plan_later: str | None,
+    ) -> RoadmapPlan:
+        with SessionLocal() as db:
+            plan = (
+                db.query(RoadmapPlan)
+                .filter(
+                    RoadmapPlan.project_id == project_id,
+                    RoadmapPlan.pillar == pillar,
+                    RoadmapPlan.sub_category == sub_category,
+                )
+                .first()
+            )
+            if not plan:
+                plan = RoadmapPlan(
+                    project_id=project_id,
+                    pillar=pillar,
+                    sub_category=sub_category,
+                    plan_now=plan_now,
+                    plan_next=plan_next,
+                    plan_later=plan_later,
+                )
+                db.add(plan)
+            else:
+                plan.plan_now = plan_now
+                plan.plan_next = plan_next
+                plan.plan_later = plan_later
+            db.commit()
+            db.refresh(plan)
+            return plan
+
     def update_assumption_title(self, assumption_id: int, new_title: str) -> None:
         self.update_assumption(assumption_id, {"title": new_title})
 
@@ -1440,6 +1533,7 @@ class DbService:
             "members": [{"user_id": member.user_id, "role": member.role} for member in project.members],
             "collections": [self._serialize_collection(item) for item in project.collections],
             "automation_rules": [self._serialize_automation_rule(item) for item in project.automation_rules],
+            "roadmap_plans": [self._serialize_roadmap_plan(item) for item in project.roadmap_plans],
             "canvas_items": [
                 {
                     "id": item.id,
@@ -1456,6 +1550,18 @@ class DbService:
             "id": collection.id,
             "name": collection.name,
             "description": collection.description,
+        }
+
+    def _serialize_roadmap_plan(self, plan: RoadmapPlan) -> Dict[str, Any]:
+        return {
+            "id": plan.id,
+            "project_id": plan.project_id,
+            "pillar": plan.pillar,
+            "sub_category": plan.sub_category,
+            "plan_now": plan.plan_now,
+            "plan_next": plan.plan_next,
+            "plan_later": plan.plan_later,
+            "updated_at": plan.updated_at.isoformat() if plan.updated_at else None,
         }
 
     def _serialize_automation_rule(self, rule: AutomationRule) -> Dict[str, Any]:
