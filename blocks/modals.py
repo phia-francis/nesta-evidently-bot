@@ -227,8 +227,7 @@ def get_roadmap_modal(
     project_id: int | None = None,
 ) -> dict:
     roadmap_plan = roadmap_plan or {}
-    pillar_label = pillar.split(". ", 1)[-1].title()
-    plan_context = f"Planning for: {pillar_label} → {sub_category}"
+    plan_context = f"Planning for: {pillar} → {sub_category}"
     metadata = {"pillar": pillar, "sub_category": sub_category}
     if project_id is not None:
         metadata["project_id"] = project_id
@@ -237,7 +236,7 @@ def get_roadmap_modal(
         "type": "modal",
         "callback_id": "save_roadmap_plan",
         "private_metadata": json.dumps(metadata),
-        "title": {"type": "plain_text", "text": "Edit Roadmap"},
+        "title": {"type": "plain_text", "text": _truncate_text(f"Roadmap for {sub_category}", 24)},
         "submit": {"type": "plain_text", "text": "Save"},
         "close": {"type": "plain_text", "text": "Cancel"},
         "blocks": [
@@ -250,6 +249,7 @@ def get_roadmap_modal(
                     "type": "plain_text_input",
                     "action_id": "plan_now",
                     "multiline": True,
+                    "placeholder": {"type": "plain_text", "text": "What do we need to learn FIRST?"},
                     "initial_value": _truncate_text(roadmap_plan.get("plan_now", "") or "", 2900),
                 },
             },
@@ -261,6 +261,7 @@ def get_roadmap_modal(
                     "type": "plain_text_input",
                     "action_id": "plan_next",
                     "multiline": True,
+                    "placeholder": {"type": "plain_text", "text": "What do we need to learn while growing?"},
                     "initial_value": _truncate_text(roadmap_plan.get("plan_next", "") or "", 2900),
                 },
             },
@@ -272,6 +273,7 @@ def get_roadmap_modal(
                     "type": "plain_text_input",
                     "action_id": "plan_later",
                     "multiline": True,
+                    "placeholder": {"type": "plain_text", "text": "What do we need to learn at scale?"},
                     "initial_value": _truncate_text(roadmap_plan.get("plan_later", "") or "", 2900),
                 },
             },

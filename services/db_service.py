@@ -29,16 +29,10 @@ from sqlalchemy.orm import Session, declarative_base, joinedload, relationship, 
 from cryptography.fernet import Fernet, InvalidToken
 
 from config import Config
-from constants import VALID_ASSUMPTION_CATEGORIES
 from services.toolkit_service import ToolkitService
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./evidently.db")
 
-ASSUMPTION_CATEGORY_ENUM = Enum(
-    *VALID_ASSUMPTION_CATEGORIES,
-    name="assumption_category",
-    native_enum=False,
-)
 ASSUMPTION_STATUS_ENUM = Enum(
     "Testing",
     "Validated",
@@ -216,7 +210,8 @@ class Assumption(Base):
     id = Column(Integer, primary_key=True, index=True)
     project_id = Column(Integer, ForeignKey("projects.id"))
     title = Column(String(255))
-    category = Column(ASSUMPTION_CATEGORY_ENUM, default="Opportunity")
+    category = Column(Text, default="Opportunity")
+    sub_category = Column(String(100), nullable=True)
     evidence_link = Column(Text)
     lane = Column(String(50), default="Now")
     horizon = Column(ASSUMPTION_HORIZON_ENUM, nullable=True)
@@ -392,17 +387,18 @@ class DbService:
                 "status",
                 "evidence_density",
                 "source_type",
-                "source_id",
-                "confidence_score",
-                "test_and_learn_phase",
-                "test_phase",
-                "last_tested_at",
-                "owner_id",
-                "updated_at",
-                "category",
-                "evidence_link",
-                "horizon",
-            },
+            "source_id",
+            "confidence_score",
+            "test_and_learn_phase",
+            "test_phase",
+            "last_tested_at",
+            "owner_id",
+            "updated_at",
+            "category",
+            "sub_category",
+            "evidence_link",
+            "horizon",
+        },
             "canvas_items": {"section", "text", "ai_generated"},
             "experiments": {"outcome", "assumption_id", "kpi_target", "kpi_actual"},
             "decisions": {"assumption_id", "impact", "uncertainty", "user_id"},
@@ -456,7 +452,8 @@ class DbService:
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS last_tested_at TIMESTAMP;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS owner_id VARCHAR(50);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;"))
-                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'Opportunity';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'Opportunity';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS sub_category VARCHAR(100);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_link TEXT;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS horizon VARCHAR(50) DEFAULT 'now';"))
 
@@ -1151,6 +1148,7 @@ class DbService:
                 project_id=project_id,
                 title=data.get("title"),
                 category=data.get("category", "Opportunity"),
+                sub_category=data.get("sub_category"),
                 evidence_link=data.get("evidence_link"),
                 lane=lane_value,
                 validation_status=data.get("validation_status", "Testing"),
@@ -1243,6 +1241,8 @@ class DbService:
                 assumption.evidence_density = data["evidence_density"]
             if "category" in data:
                 assumption.category = data["category"]
+            if "sub_category" in data:
+                assumption.sub_category = data["sub_category"]
             if "evidence_link" in data:
                 assumption.evidence_link = data["evidence_link"]
             if "confidence_score" in data:
@@ -1278,6 +1278,7 @@ class DbService:
         self,
         project_id: int,
         category: str,
+        sub_category: str,
         question: str,
         confidence_score: int,
         answer: str | None = None,
@@ -1289,6 +1290,7 @@ class DbService:
                     Assumption.project_id == project_id,
                     Assumption.title == question,
                     Assumption.category == category,
+                    Assumption.sub_category == sub_category,
                 )
                 .first()
             )
@@ -1297,6 +1299,7 @@ class DbService:
                     project_id=project_id,
                     title=question,
                     category=category,
+                    sub_category=sub_category,
                     validation_status="Testing",
                     status="Testing",
                     confidence_score=confidence_score,
@@ -1596,6 +1599,7 @@ class DbService:
             "id": assumption.id,
             "title": assumption.title,
             "category": assumption.category,
+            "sub_category": assumption.sub_category,
             "evidence_link": assumption.evidence_link,
             "lane": assumption.lane,
             "horizon": assumption.horizon,

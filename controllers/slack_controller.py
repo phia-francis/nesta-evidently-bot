@@ -846,7 +846,7 @@ def action_save_diagnostic(ack, body, client, logger):  # noqa: ANN001
                 selection = block_values.get("confidence_score", {}).get("selected_option")
                 if selection:
                     confidences[lookup_key] = int(selection["value"])
-        for lookup_key, (_, _, question) in question_map.items():
+        for lookup_key, (pillar, sub_category, question) in question_map.items():
             score = confidences.get(lookup_key)
             if score is None:
                 continue
@@ -854,7 +854,8 @@ def action_save_diagnostic(ack, body, client, logger):  # noqa: ANN001
             # 5-Pillar diagnostic answers are stored as generic assumptions to avoid overloading legacy categories.
             db_service.upsert_diagnostic_assumption(
                 project["id"],
-                ASSUMPTION_DEFAULT_CATEGORY,
+                pillar,
+                sub_category,
                 question,
                 score,
                 answer=answer,
@@ -3423,12 +3424,19 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
             if extraction.get("error"):
                 extraction = {
                     "title": raw_text.strip(),
-                    "category": ASSUMPTION_DEFAULT_CATEGORY,
-                    "confidence_score": 0,
+                    "category": "1. VALUE",
+                    "sub_category": "General",
+                    "confidence": 0,
                 }
             title = extraction.get("title") or raw_text.strip()
             category = extraction.get("category", ASSUMPTION_DEFAULT_CATEGORY)
-            confidence_score = extraction.get("confidence_score", 0)
+            sub_category = extraction.get("sub_category") or "General"
+            confidence_value = extraction.get("confidence", extraction.get("confidence_score", 0))
+            try:
+                confidence_score = int(confidence_value)
+            except (TypeError, ValueError):
+                confidence_score = 0
+            confidence_score = max(0, min(5, confidence_score))
             similar_title = db_service.find_similar_assumption(project["id"], title)
             if similar_title:
                 messenger_service.post_ephemeral(
@@ -3441,9 +3449,20 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
                 data={
                     "title": title,
                     "category": category,
+                    "sub_category": sub_category,
                     "confidence_score": confidence_score,
                     "owner_id": user_id,
                 },
+            )
+            category_label = str(category).split(". ", 1)[-1].title()
+            sub_category_label = str(sub_category).strip().title()
+            messenger_service.post_ephemeral(
+                channel=user_id,
+                user=user_id,
+                text=(
+                    "✅ I filed that under "
+                    f"{category_label} -> {sub_category_label} with a confidence of {confidence_score}/5."
+                ),
             )
         else:
             title = values["assumption_title"]["title_input"]["value"]

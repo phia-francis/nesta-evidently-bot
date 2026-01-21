@@ -8,7 +8,6 @@ import google.generativeai as genai
 from google.api_core.exceptions import GoogleAPICallError
 
 from config import Config
-from constants import ASSUMPTION_DEFAULT_CATEGORY, VALID_ASSUMPTION_CATEGORIES
 from services import knowledge_base
 
 logger = logging.getLogger(__name__)
@@ -300,9 +299,10 @@ Return JSON: { "horizon": "now|next|later", "reason": "short explanation" }
         prompt = (
             "Extract the following from the raw text: "
             "1. Core Assumption (Title), "
-            "2. Category (Opportunity/Capability/Progress), "
-            "3. Confidence Score (1-5). "
-            "Return JSON."
+            "2. Category (one of: 1. VALUE, 2. GROWTH, 3. SUSTAINABILITY, 4. IMPACT, 5. FEASIBILITY), "
+            "3. Sub-Category (e.g., Needs, Market, Finance), "
+            "4. Confidence Score (1-5). "
+            "Return JSON: {\"title\": \"...\", \"category\": \"1. VALUE\", \"sub_category\": \"Needs\", \"confidence\": 3}."
         )
         try:
             response = self.model.generate_content(
@@ -316,19 +316,28 @@ Return JSON: { "horizon": "now|next|later", "reason": "short explanation" }
             if not isinstance(parsed, dict):
                 return {"error": "Invalid AI response."}
             title = parsed.get("title") or parsed.get("assumption") or parsed.get("core_assumption")
-            category = parsed.get("category", ASSUMPTION_DEFAULT_CATEGORY)
+            category = parsed.get("category") or "1. VALUE"
+            sub_category = parsed.get("sub_category") or parsed.get("subcategory") or parsed.get("subCategory")
             confidence = parsed.get("confidence_score", parsed.get("confidence", 0))
             try:
                 confidence_score = int(confidence)
             except (TypeError, ValueError):
                 confidence_score = 0
             confidence_score = max(0, min(5, confidence_score))
-            if category not in VALID_ASSUMPTION_CATEGORIES:
-                category = ASSUMPTION_DEFAULT_CATEGORY
+            valid_pillars = {
+                "1. VALUE",
+                "2. GROWTH",
+                "3. SUSTAINABILITY",
+                "4. IMPACT",
+                "5. FEASIBILITY",
+            }
+            if category not in valid_pillars:
+                category = "1. VALUE"
             return {
                 "title": str(title or raw_text).strip(),
                 "category": category,
-                "confidence_score": confidence_score,
+                "sub_category": str(sub_category).strip() if sub_category else None,
+                "confidence": confidence_score,
             }
         except json.JSONDecodeError as exc:
             logger.error("AI Assumption Extraction - Failed to parse JSON", exc_info=True)
