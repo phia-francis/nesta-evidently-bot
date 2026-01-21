@@ -1,6 +1,7 @@
 import tempfile
 from pathlib import Path
 
+from constants import LOW_CONFIDENCE_ASSUMPTION_THRESHOLD
 from services.ai_service import EvidenceAI
 from services.db_service import DbService
 
@@ -100,7 +101,9 @@ class ReportService:
         roadmap_plans = project.get("roadmap_plans", [])
 
         if flow_stage == "audit":
-            low_confidence = [a for a in assumptions if (a.get("confidence_score") or 0) <= 2]
+            low_confidence = [
+                a for a in assumptions if (a.get("confidence_score") or 0) <= LOW_CONFIDENCE_ASSUMPTION_THRESHOLD
+            ]
             sorted_items = sorted(low_confidence, key=lambda item: item.get("confidence_score") or 0)
             top_items = [item.get("title", "Untitled") for item in sorted_items[:3]]
             focus_list = ", ".join(top_items) if top_items else "no low-confidence assumptions yet"
