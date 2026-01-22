@@ -1,4 +1,5 @@
 import asyncio
+import os
 import threading
 
 from aiohttp import web
@@ -10,25 +11,23 @@ from controllers.slack_controller import db_service, google_service, handle_asan
 from controllers.web_controller import create_web_app
 
 
-def start_web_server() -> None:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    web_app = create_web_app(
+def create_app() -> web.Application:
+    return create_web_app(
         db_service=db_service,
         google_service=google_service,
         handle_asana_webhook=handle_asana_webhook,
         logger=logger,
     )
-    runner = web.AppRunner(web_app)
-    loop.run_until_complete(runner.setup())
-    site = web.TCPSite(runner, host=Config.HOST, port=Config.PORT)
-    loop.run_until_complete(site.start())
-    loop.run_forever()
+
+
+def start_slack_handler() -> None:
+    handler = SocketModeHandler(slack_app, Config.SLACK_APP_TOKEN)
+    handler.start()
 
 
 if __name__ == "__main__":
-    web_thread = threading.Thread(target=start_web_server, daemon=True)
-    web_thread.start()
+    slack_thread = threading.Thread(target=start_slack_handler, daemon=True)
+    slack_thread.start()
 
-    handler = SocketModeHandler(slack_app, Config.SLACK_APP_TOKEN)
-    handler.start()
+    app = create_app()
+    web.run_app(app, host=Config.HOST, port=Config.PORT)
