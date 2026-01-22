@@ -215,6 +215,9 @@ class Assumption(Base):
     evidence_link = Column(Text)
     lane = Column(String(50), default="Now")
     horizon = Column(ASSUMPTION_HORIZON_ENUM, nullable=True)
+    plan_now = Column(Text, nullable=True)
+    plan_next = Column(Text, nullable=True)
+    plan_later = Column(Text, nullable=True)
     validation_status = Column(String(50), default="Testing")
     status = Column(ASSUMPTION_STATUS_ENUM, default="Testing")
     evidence_density = Column(Integer, default=0)
@@ -387,18 +390,21 @@ class DbService:
                 "status",
                 "evidence_density",
                 "source_type",
-            "source_id",
-            "confidence_score",
-            "test_and_learn_phase",
-            "test_phase",
-            "last_tested_at",
-            "owner_id",
-            "updated_at",
-            "category",
-            "sub_category",
-            "evidence_link",
-            "horizon",
-        },
+                "source_id",
+                "confidence_score",
+                "test_and_learn_phase",
+                "test_phase",
+                "last_tested_at",
+                "owner_id",
+                "updated_at",
+                "category",
+                "sub_category",
+                "evidence_link",
+                "horizon",
+                "plan_now",
+                "plan_next",
+                "plan_later",
+            },
             "canvas_items": {"section", "text", "ai_generated"},
             "experiments": {"outcome", "assumption_id", "kpi_target", "kpi_actual"},
             "decisions": {"assumption_id", "impact", "uncertainty", "user_id"},
@@ -456,6 +462,9 @@ class DbService:
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS sub_category VARCHAR(100);"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS evidence_link TEXT;"))
                     connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS horizon VARCHAR(50) DEFAULT 'now';"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS plan_now TEXT;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS plan_next TEXT;"))
+                    connection.execute(text("ALTER TABLE assumptions ADD COLUMN IF NOT EXISTS plan_later TEXT;"))
 
                     # --- 3. Fix EXPERIMENTS Table (Prevent future crashes) ---
                     connection.execute(text("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS hypothesis TEXT;"))

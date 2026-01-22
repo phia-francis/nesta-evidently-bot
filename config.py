@@ -1,7 +1,26 @@
 import logging
 import os
 from enum import Enum
+
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+
+
+FALLBACK_ENCRYPTION_KEY = b"MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI="
+
+
+def get_encryption_key() -> bytes:
+    key = os.environ.get("GOOGLE_TOKEN_ENCRYPTION_KEY")
+    if not key:
+        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is not set; using fallback key.")
+        return FALLBACK_ENCRYPTION_KEY
+    try:
+        key_bytes = key.encode("utf-8")
+        Fernet(key_bytes)
+        return key_bytes
+    except Exception:  # noqa: BLE001
+        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is invalid; using fallback key.")
+        return FALLBACK_ENCRYPTION_KEY
 
 load_dotenv()
 
@@ -21,15 +40,7 @@ class Config:
     # Standard Database URL (default to local SQLite for dev)
     DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./evidently.db")
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-    _google_token_encryption_key = os.environ.get("GOOGLE_TOKEN_ENCRYPTION_KEY")
-    if not _google_token_encryption_key:
-        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is not set.")
-        if ENVIRONMENT.lower() in {"development", "dev", "local"}:
-            GOOGLE_TOKEN_ENCRYPTION_KEY = "dev-placeholder-key"
-        else:
-            GOOGLE_TOKEN_ENCRYPTION_KEY = None
-    else:
-        GOOGLE_TOKEN_ENCRYPTION_KEY = _google_token_encryption_key
+    GOOGLE_TOKEN_ENCRYPTION_KEY = get_encryption_key()
     OAUTH_STATE_TTL_SECONDS = int(os.environ.get("OAUTH_STATE_TTL_SECONDS", 600))
     PORT = int(os.environ.get("PORT", 10000))
     OAUTH_PORT = int(os.environ.get("OAUTH_PORT", 10001))
