@@ -95,7 +95,7 @@ def upgrade() -> None:
             if not _column_exists(inspector, "roadmap_plans", "project_id"):
                 batch_op.add_column(sa.Column("project_id", sa.Integer(), sa.ForeignKey("projects.id"), nullable=False, server_default=0))
             if not _column_exists(inspector, "roadmap_plans", "pillar"):
-                batch_op.add_column(sa.Column("pillar", sa.String(length=50), nullable=False))
+                batch_op.add_column(sa.Column("pillar", sa.String(length=50), nullable=False, server_default=""))
             if not _column_exists(inspector, "roadmap_plans", "sub_category"):
                 batch_op.add_column(sa.Column("sub_category", sa.String(length=100), nullable=False))
             if not _column_exists(inspector, "roadmap_plans", "plan_now"):
