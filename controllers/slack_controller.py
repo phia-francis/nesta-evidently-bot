@@ -983,7 +983,7 @@ def save_diagnostic_answer(ack, body, client, logger):  # noqa: ANN001
             answer=answer or None,
         )
         publish_home_tab_async(client, user_id, "overview")
-    except Exception as exc:  # noqa: BLE001
+    except SQLAlchemyError as exc:
         logger.error("Failed to save diagnostic answer: %s", exc, exc_info=True)
 
 
