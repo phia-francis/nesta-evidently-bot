@@ -180,6 +180,62 @@ def get_diagnostic_modal(
     }
 
 
+def get_edit_diagnostic_answer_modal(
+    *,
+    pillar: str,
+    sub_category: str,
+    question: str,
+    answer: str | None = None,
+    confidence_score: int | None = None,
+    project_id: int | None = None,
+) -> dict:
+    options = [{"text": {"type": "plain_text", "text": str(i)}, "value": str(i)} for i in range(1, 6)]
+    initial_option = None
+    if confidence_score is not None:
+        initial_option = next((option for option in options if option["value"] == str(confidence_score)), None)
+
+    metadata = {"pillar": pillar, "sub_category": sub_category, "question": question}
+    if project_id is not None:
+        metadata["project_id"] = project_id
+
+    return {
+        "type": "modal",
+        "callback_id": "save_diagnostic_answer",
+        "private_metadata": json.dumps(metadata),
+        "title": {"type": "plain_text", "text": "Answer Diagnostic"},
+        "submit": {"type": "plain_text", "text": "Save"},
+        "close": {"type": "plain_text", "text": "Cancel"},
+        "blocks": [
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": f"*{pillar}* → {sub_category}"}],
+            },
+            {
+                "type": "input",
+                "block_id": "diagnostic_answer",
+                "label": {"type": "plain_text", "text": _truncate_text(question, 2000)},
+                "element": {
+                    "type": "plain_text_input",
+                    "action_id": "answer_input",
+                    "multiline": True,
+                    "initial_value": _truncate_text(answer or "", 3000),
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "diagnostic_confidence",
+                "label": {"type": "plain_text", "text": "Confidence Score (1-5)"},
+                "element": {
+                    "type": "static_select",
+                    "action_id": "confidence_score",
+                    "options": options,
+                    "initial_option": initial_option,
+                },
+            },
+        ],
+    }
+
+
 def get_new_project_modal() -> dict:
     stage_options = [
         {"text": {"type": "plain_text", "text": "Audit"}, "value": "audit"},
