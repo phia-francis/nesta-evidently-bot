@@ -72,7 +72,7 @@ def upgrade() -> None:
             if not _column_exists(inspector, "assumptions", "sub_category"):
                 batch_op.add_column(sa.Column("sub_category", sa.String(length=100), nullable=True))
             if not _column_exists(inspector, "assumptions", "confidence_score"):
-                batch_op.add_column(sa.Column("confidence_score", sa.Integer(), nullable=False, server_default="0"))
+                batch_op.add_column(sa.Column("confidence_score", sa.Integer(), nullable=False, server_default=0))
             if not _column_exists(inspector, "assumptions", "horizon"):
                 batch_op.add_column(sa.Column("horizon", ASSUMPTION_HORIZON_ENUM, nullable=True))
             if not _column_exists(inspector, "assumptions", "test_phase"):
