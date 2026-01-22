@@ -29,6 +29,5 @@ if __name__ == "__main__":
     slack_thread = threading.Thread(target=start_slack_handler, daemon=True)
     slack_thread.start()
 
-    port = int(os.environ.get("PORT", 10000))
     app = create_app()
-    web.run_app(app, host="0.0.0.0", port=port)
+    web.run_app(app, host=Config.HOST, port=Config.PORT)
