@@ -18,7 +18,7 @@ def get_encryption_key() -> bytes:
         key_bytes = key.encode("utf-8")
         Fernet(key_bytes)
         return key_bytes
-    except Exception:  # noqa: BLE001
+    except ValueError:  # noqa: BLE001
         logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is invalid; using fallback key.")
         return FALLBACK_ENCRYPTION_KEY
 
