@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from blocks.ui_manager import UIManager
 from constants import LOW_CONFIDENCE_THRESHOLD
 from services.playbook_service import PlaybookService
+from utils.diagnostic_utils import normalize_question_text
 
 
 _FLOW_STAGE_LABELS = {
@@ -159,6 +161,78 @@ def _assumption_matches(assumption: dict[str, Any], pillar: str, sub_category: s
     return _normalize_label(assumption.get("category")) == _normalize_label(pillar) and _normalize_label(
         assumption.get("sub_category")
     ) == _normalize_label(sub_category)
+
+
+def _diagnostic_key(pillar: str, sub_category: str, question: str) -> tuple[str, str, str]:
+    return (_normalize_label(pillar), _normalize_label(sub_category), normalize_question_text(question))
+
+
+def _build_diagnostic_answer_lookup(assumptions: list[dict[str, Any]]) -> dict[tuple[str, str, str], dict[str, Any]]:
+    lookup: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for assumption in assumptions:
+        question = assumption.get("title")
+        if not question:
+            continue
+        key = _diagnostic_key(
+            assumption.get("category"),
+            assumption.get("sub_category"),
+            question,
+        )
+        lookup[key] = assumption
+    return lookup
+
+
+def _get_audit_view(
+    *,
+    framework: dict[str, dict[str, object]],
+    assumptions: list[dict[str, Any]],
+    blocks: list[dict[str, Any]],
+) -> None:
+    answer_lookup = _build_diagnostic_answer_lookup(assumptions)
+    for pillar_key, pillar_data in framework.items():
+        blocks.append(
+            {
+                "type": "header",
+                "text": {"type": "plain_text", "text": pillar_key},
+            }
+        )
+        sub_categories = pillar_data.get("sub_categories", {})
+        for sub_category, sub_data in sub_categories.items():
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": f"*{sub_category}*"},
+                }
+            )
+            questions = sub_data.get("questions", [])
+            if not questions:
+                blocks.append(
+                    {
+                        "type": "context",
+                        "elements": [{"type": "mrkdwn", "text": "_No diagnostic prompts available._"}],
+                    }
+                )
+                continue
+            for question in questions:
+                lookup_key = _diagnostic_key(pillar_key, sub_category, question)
+                assumption = answer_lookup.get(lookup_key, {})
+                answer = assumption.get("source_snippet") or "No answer yet"
+                value = json.dumps({"pillar": pillar_key, "sub_category": sub_category, "question": question})
+                blocks.append(
+                    {
+                        "type": "section",
+                        "fields": [
+                            {"type": "mrkdwn", "text": _truncate(question)},
+                            {"type": "mrkdwn", "text": _truncate(answer)},
+                        ],
+                        "accessory": _safe_button(
+                            "✏️ Answer",
+                            "open_edit_diagnostic_answer",
+                            value=value,
+                        ),
+                    }
+                )
+            blocks.append({"type": "divider"})
 
 
 def _render_framework_sections(
@@ -398,13 +472,9 @@ def get_home_view(
         )
 
         framework = playbook_service.get_5_pillar_framework()
-        roadmap_plans = {
-            (plan.get("pillar"), plan.get("sub_category")): plan for plan in project.get("roadmap_plans", [])
-        }
-        _render_framework_sections(
+        _get_audit_view(
             framework=framework,
             assumptions=assumptions,
-            roadmap_plans=roadmap_plans,
             blocks=blocks,
         )
 

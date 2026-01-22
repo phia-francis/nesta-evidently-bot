@@ -6,21 +6,23 @@ from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 
-FALLBACK_ENCRYPTION_KEY = b"MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI="
-
-
-def get_encryption_key() -> bytes:
+def get_encryption_key() -> bytes | None:
     key = os.environ.get("GOOGLE_TOKEN_ENCRYPTION_KEY")
+    environment = os.environ.get("ENVIRONMENT", "development").lower()
     if not key:
-        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is not set; using fallback key.")
-        return FALLBACK_ENCRYPTION_KEY
+        if environment == "production":
+            raise RuntimeError("GOOGLE_TOKEN_ENCRYPTION_KEY must be set in production.")
+        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is not set; Google tokens will be stored in plaintext.")
+        return None
     try:
         key_bytes = key.encode("utf-8")
         Fernet(key_bytes)
         return key_bytes
     except ValueError:  # noqa: BLE001
-        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is invalid; using fallback key.")
-        return FALLBACK_ENCRYPTION_KEY
+        if environment == "production":
+            raise RuntimeError("GOOGLE_TOKEN_ENCRYPTION_KEY is invalid in production.")
+        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is invalid; Google tokens will be stored in plaintext.")
+        return None
 
 load_dotenv()
 

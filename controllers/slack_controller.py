@@ -53,6 +53,7 @@ from blocks.modals import (
     change_stage_modal,
     create_channel_modal,
     experiment_modal,
+    get_edit_diagnostic_answer_modal,
     extract_insights_modal,
     get_diagnostic_modal,
     get_loading_modal,
@@ -83,6 +84,7 @@ from services.report_service import ReportService
 from services.sync_service import TwoWaySyncService
 from services.scheduler_service import start_scheduler
 from services.toolkit_service import ToolkitService
+from utils.diagnostic_utils import normalize_question_text
 
 
 logging.basicConfig(level=logging.INFO)
@@ -703,6 +705,28 @@ def _build_diagnostic_question_map(
     return question_map
 
 
+def _normalize_label(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _find_diagnostic_assumption(
+    assumptions: list[dict[str, Any]],
+    pillar: str,
+    sub_category: str,
+    question: str,
+) -> dict[str, Any] | None:
+    target_key = (_normalize_label(pillar), _normalize_label(sub_category), normalize_question_text(question))
+    for assumption in assumptions:
+        assumption_key = (
+            _normalize_label(assumption.get("category")),
+            _normalize_label(assumption.get("sub_category")),
+            normalize_question_text(assumption.get("title") or ""),
+        )
+        if assumption_key == target_key:
+            return assumption
+    return None
+
+
 def _map_ai_response_to_diagnostic(
     framework: dict[str, dict[str, object]],
     ai_response: dict[str, Any],
@@ -886,6 +910,81 @@ def action_save_diagnostic(ack, body, client, logger):  # noqa: ANN001
         publish_home_tab_async(client, user_id, "overview")
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to save audit scores: %s", exc, exc_info=True)
+
+
+@app.action("open_edit_diagnostic_answer")
+def open_edit_diagnostic_answer(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    raw_value = body["actions"][0].get("value", "")
+    try:
+        payload = json.loads(raw_value) if raw_value else {}
+    except json.JSONDecodeError:
+        payload = {}
+    pillar = payload.get("pillar")
+    sub_category = payload.get("sub_category")
+    question = payload.get("question") or raw_value
+    if not pillar or not sub_category or not question:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Unable to open that diagnostic question.")
+        return
+    existing = _find_diagnostic_assumption(project.get("assumptions", []), pillar, sub_category, question)
+    answer = existing.get("source_snippet") if existing else None
+    confidence_score = existing.get("confidence_score") if existing else None
+    client.views_open(
+        trigger_id=body["trigger_id"],
+        view=get_edit_diagnostic_answer_modal(
+            pillar=pillar,
+            sub_category=sub_category,
+            question=question,
+            answer=answer,
+            confidence_score=confidence_score,
+            project_id=project["id"],
+        ),
+    )
+
+
+@app.view("save_diagnostic_answer")
+def save_diagnostic_answer(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    user_id = body["user"]["id"]
+    project = db_service.get_active_project(user_id)
+    if not project:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Please create a project first.")
+        return
+    metadata = body["view"].get("private_metadata") or "{}"
+    try:
+        payload = json.loads(metadata)
+    except json.JSONDecodeError:
+        payload = {}
+    pillar = payload.get("pillar")
+    sub_category = payload.get("sub_category")
+    question = payload.get("question")
+    if not pillar or not sub_category or not question:
+        client.chat_postEphemeral(channel=user_id, user=user_id, text="Missing diagnostic details.")
+        return
+    values = body["view"]["state"]["values"]
+    answer = values.get("diagnostic_answer", {}).get("answer_input", {}).get("value", "").strip()
+    selection = values.get("diagnostic_confidence", {}).get("confidence_score", {}).get("selected_option")
+    try:
+        confidence_score = int(selection["value"]) if selection else 0
+    except (TypeError, ValueError):
+        confidence_score = 0
+    try:
+        db_service.upsert_diagnostic_assumption(
+            project["id"],
+            pillar,
+            sub_category,
+            question,
+            confidence_score,
+            answer=answer or None,
+        )
+        publish_home_tab_async(client, user_id, "overview")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to save diagnostic answer: %s", exc, exc_info=True)
 
 
 @app.action("open_roadmap_modal")
@@ -3429,8 +3528,10 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
                     "confidence": 0,
                 }
             title = extraction.get("title") or raw_text.strip()
-            category = extraction.get("category", ASSUMPTION_DEFAULT_CATEGORY)
-            sub_category = extraction.get("sub_category") or "General"
+            extracted_category = extraction.get("category")
+            extracted_sub_category = extraction.get("sub_category")
+            category = str(extracted_category).strip() if extracted_category else ASSUMPTION_DEFAULT_CATEGORY
+            sub_category = str(extracted_sub_category).strip() if extracted_sub_category else "General"
             confidence_value = extraction.get("confidence", extraction.get("confidence_score", 0))
             try:
                 confidence_score = int(confidence_value)
