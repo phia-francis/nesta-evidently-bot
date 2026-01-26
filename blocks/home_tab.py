@@ -309,25 +309,28 @@ def _render_framework_sections(
                 horizon = _normalize_label(assumption.get("horizon") or assumption.get("lane") or "now")
                 horizon_key = horizon if horizon in grouped else "now"
                 grouped[horizon_key].append(assumption)
-            for horizon_key in horizon_order:
-                label = horizon_labels.get(horizon_key, horizon_key.upper())
-                blocks.append(
-                    {
-                        "type": "context",
-                        "elements": [{"type": "mrkdwn", "text": f"*{label}*"}],
-                    }
-                )
-                items = grouped.get(horizon_key, [])
-                if items:
-                    for assumption in items:
-                        blocks.append(_plan_assumption_section(assumption))
-                else:
+            has_items = any(grouped.values())
+            if has_items:
+                for horizon_key in horizon_order:
+                    items = grouped.get(horizon_key, [])
+                    if not items:
+                        continue
+                    label = horizon_labels.get(horizon_key, horizon_key.upper())
                     blocks.append(
                         {
                             "type": "context",
-                            "elements": [{"type": "mrkdwn", "text": "_No assumptions in this horizon yet._"}],
+                            "elements": [{"type": "mrkdwn", "text": f"*{label}*"}],
                         }
                     )
+                    for assumption in items:
+                        blocks.append(_plan_assumption_section(assumption))
+            else:
+                blocks.append(
+                    {
+                        "type": "context",
+                        "elements": [{"type": "mrkdwn", "text": "_No roadmap assumptions yet._"}],
+                    }
+                )
             if not matching_assumptions:
                 questions = sub_data.get("questions", [])
                 prompt_text = "\n".join(questions) if questions else "No diagnostic prompts available."
