@@ -99,38 +99,47 @@ class ReportService:
         flow_stage = (project.get("flow_stage") or "audit").lower()
         assumptions = project.get("assumptions", [])
         roadmap_plans = project.get("roadmap_plans", [])
+        experiments = project.get("experiments", [])
 
         if flow_stage == "audit":
             low_confidence = [
-                a for a in assumptions if (a.get("confidence_score") or 0) <= LOW_CONFIDENCE_ASSUMPTION_THRESHOLD
+                a
+                for a in assumptions
+                if (a.get("confidence_score") is not None)
+                and 1 <= int(a.get("confidence_score") or 0) <= LOW_CONFIDENCE_ASSUMPTION_THRESHOLD
             ]
             sorted_items = sorted(low_confidence, key=lambda item: item.get("confidence_score") or 0)
-            top_items = [item.get("title", "Untitled") for item in sorted_items[:3]]
-            focus_list = ", ".join(top_items) if top_items else "no low-confidence assumptions yet"
-            return (
-                "🚨 Focus: Validation. We have low confidence in "
-                f"{focus_list}. Who can own these?"
-            )
+            if not sorted_items:
+                return "🚨 Focus: Validation. No low-confidence assumptions (score 1-2) captured yet."
+            agenda_lines = [
+                f"- {item.get('title', 'Untitled')} (Confidence {item.get('confidence_score')})"
+                for item in sorted_items
+            ]
+            return "🚨 Focus: Validation. Review these low-confidence assumptions:\n" + "\n".join(agenda_lines)
 
         if flow_stage == "plan":
-            now_plans = [
-                plan.get("plan_now", "").strip()
-                for plan in roadmap_plans
-                if plan.get("plan_now")
+            now_items = [
+                assumption.get("title", "Untitled")
+                for assumption in assumptions
+                if (assumption.get("horizon") or "").lower() == "now"
+                or (assumption.get("lane") or "").lower() == "now"
             ]
-            plan_list = ", ".join(item for item in now_plans if item) or "no immediate plans yet"
-            return (
-                "🗺️ Focus: Prioritization. We agreed to do "
-                f"{plan_list} immediately. Are we blocked?"
-            )
+            if not now_items:
+                now_plans = [
+                    plan.get("plan_now", "").strip()
+                    for plan in roadmap_plans
+                    if plan.get("plan_now")
+                ]
+                now_items = [item for item in now_plans if item]
+            if not now_items:
+                return "🗺️ Focus: Prioritization. No NOW horizon items defined yet."
+            agenda_lines = [f"- {item}" for item in now_items]
+            return "🗺️ Focus: Prioritization. Review NOW horizon items:\n" + "\n".join(agenda_lines)
 
-        active_items = [
-            assumption.get("title", "Untitled")
-            for assumption in assumptions
-            if assumption.get("test_phase")
+        live_experiments = [
+            f"- {experiment.get('title', 'Untitled')} (Status: {experiment.get('status', 'Planning')})"
+            for experiment in experiments
         ]
-        active_list = ", ".join(active_items) if active_items else "no active experiments yet"
-        return (
-            "🧪 Focus: Results. Reviewing active experiments: "
-            f"{active_list}. What have we learned?"
-        )
+        if not live_experiments:
+            return "🧪 Focus: Results. No live experiments logged yet."
+        return "🧪 Focus: Results. Review live experiments:\n" + "\n".join(live_experiments)

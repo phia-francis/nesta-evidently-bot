@@ -63,8 +63,11 @@ def check_and_update_schema() -> None:
     with engine.begin() as connection:
         if "projects" in table_names:
             _add_column_if_missing(connection, "projects", "flow_stage", "VARCHAR(50)", "audit")
+            _add_column_if_missing(connection, "projects", "mission", "TEXT")
+            _add_column_if_missing(connection, "projects", "dashboard_message_ts", "VARCHAR(50)")
 
         if "assumptions" in table_names:
+            _add_column_if_missing(connection, "assumptions", "category", "TEXT")
             _add_column_if_missing(connection, "assumptions", "sub_category", "VARCHAR(100)")
             _add_column_if_missing(connection, "assumptions", "horizon", "VARCHAR(20)")
             _add_column_if_missing(connection, "assumptions", "confidence_score", "INTEGER", 0)
@@ -73,6 +76,7 @@ def check_and_update_schema() -> None:
             _add_column_if_missing(connection, "assumptions", "plan_later", "TEXT")
             _add_column_if_missing(connection, "assumptions", "owner_id", "VARCHAR(50)")
             _add_column_if_missing(connection, "assumptions", "test_phase", "VARCHAR(50)")
+            _add_column_if_missing(connection, "assumptions", "test_and_learn_phase", "VARCHAR(50)")
 
         if "experiments" in table_names:
             _add_column_if_missing(connection, "experiments", "kpi_target", "FLOAT")

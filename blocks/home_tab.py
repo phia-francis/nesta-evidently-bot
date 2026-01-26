@@ -113,6 +113,25 @@ def _assumption_section(assumption: dict[str, Any], highlight_low_confidence: bo
     }
 
 
+def _plan_assumption_section(assumption: dict[str, Any]) -> dict[str, Any]:
+    status = assumption.get("status") or assumption.get("validation_status") or "Testing"
+    confidence = assumption.get("confidence_score")
+    confidence_text, _ = _confidence_label(confidence)
+    title_text = _truncate(assumption.get("title", "Untitled"))
+    return {
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": f"*{title_text}*\nStatus: {status} · Confidence: {confidence_text}",
+        },
+        "accessory": _safe_button(
+            "📍 Move",
+            "move_assumption",
+            value=assumption.get("id"),
+        ),
+    }
+
+
 def _action_assumption_blocks(assumption: dict[str, Any]) -> list[dict[str, Any]]:
     section = _assumption_section(assumption)
     section.pop("accessory", None)
@@ -216,14 +235,19 @@ def _get_audit_view(
             for question in questions:
                 lookup_key = _diagnostic_key(pillar_key, sub_category, question)
                 assumption = answer_lookup.get(lookup_key, {})
-                answer = assumption.get("source_snippet") or "No answer yet"
+                answer = assumption.get("source_snippet")
+                has_answer = bool(answer)
+                question_text = _truncate(question)
+                if not has_answer:
+                    question_text = f"_{question_text}_"
+                answer_text = _truncate(answer) if has_answer else "_Diagnostic prompt — add your answer._"
                 value = json.dumps({"pillar": pillar_key, "sub_category": sub_category, "question": question})
                 blocks.append(
                     {
                         "type": "section",
                         "fields": [
-                            {"type": "mrkdwn", "text": _truncate(question)},
-                            {"type": "mrkdwn", "text": _truncate(answer)},
+                            {"type": "mrkdwn", "text": question_text},
+                            {"type": "mrkdwn", "text": answer_text},
                         ],
                         "accessory": _safe_button(
                             "✏️ Answer",
@@ -240,8 +264,11 @@ def _render_framework_sections(
     framework: dict[str, dict[str, object]],
     assumptions: list[dict[str, Any]],
     roadmap_plans: dict[tuple[str, str], dict[str, Any]],
+    roadmap_horizons: list[dict[str, str]],
     blocks: list[dict[str, Any]],
 ) -> None:
+    horizon_order = [item["key"] for item in roadmap_horizons]
+    horizon_labels = {item["key"]: item["label"] for item in roadmap_horizons}
     for pillar_key, pillar_data in framework.items():
         blocks.append(
             {
@@ -277,10 +304,34 @@ def _render_framework_sections(
             matching_assumptions = [
                 assumption for assumption in assumptions if _assumption_matches(assumption, pillar_key, sub_category)
             ]
-            if matching_assumptions:
-                for assumption in matching_assumptions:
-                    blocks.append(_assumption_section(assumption))
+            grouped: dict[str, list[dict[str, Any]]] = {key: [] for key in horizon_order}
+            for assumption in matching_assumptions:
+                horizon = _normalize_label(assumption.get("horizon") or assumption.get("lane") or "now")
+                horizon_key = horizon if horizon in grouped else "now"
+                grouped[horizon_key].append(assumption)
+            has_items = any(grouped.values())
+            if has_items:
+                for horizon_key in horizon_order:
+                    items = grouped.get(horizon_key, [])
+                    if not items:
+                        continue
+                    label = horizon_labels.get(horizon_key, horizon_key.upper())
+                    blocks.append(
+                        {
+                            "type": "context",
+                            "elements": [{"type": "mrkdwn", "text": f"*{label}*"}],
+                        }
+                    )
+                    for assumption in items:
+                        blocks.append(_plan_assumption_section(assumption))
             else:
+                blocks.append(
+                    {
+                        "type": "context",
+                        "elements": [{"type": "mrkdwn", "text": "_No roadmap assumptions yet._"}],
+                    }
+                )
+            if not matching_assumptions:
                 questions = sub_data.get("questions", [])
                 prompt_text = "\n".join(questions) if questions else "No diagnostic prompts available."
                 blocks.append(
@@ -510,6 +561,7 @@ def get_home_view(
             blocks.append({"type": "divider"})
 
         framework = playbook_service.get_5_pillar_framework()
+        roadmap_horizons = playbook_service.get_roadmap_horizons()
         roadmap_plans = {
             (plan.get("pillar"), plan.get("sub_category")): plan for plan in project.get("roadmap_plans", [])
         }
@@ -517,6 +569,7 @@ def get_home_view(
             framework=framework,
             assumptions=assumptions,
             roadmap_plans=roadmap_plans,
+            roadmap_horizons=roadmap_horizons,
             blocks=blocks,
         )
 

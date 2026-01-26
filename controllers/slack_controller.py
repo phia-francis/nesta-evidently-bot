@@ -709,6 +709,21 @@ def _normalize_label(value: str | None) -> str:
     return (value or "").strip().lower()
 
 
+def _match_framework_pillar(raw_category: str | None, framework: dict[str, dict[str, object]]) -> str:
+    if not framework:
+        return raw_category or ASSUMPTION_DEFAULT_CATEGORY
+    default_pillar = next(iter(framework.keys()))
+    if not raw_category:
+        return default_pillar
+    normalized = _normalize_label(raw_category)
+    for pillar_key in framework.keys():
+        normalized_pillar = _normalize_label(pillar_key)
+        pillar_label = _normalize_label(pillar_key.split(". ", 1)[-1])
+        if normalized in {normalized_pillar, pillar_label}:
+            return pillar_key
+    return default_pillar
+
+
 def _find_diagnostic_assumption(
     assumptions: list[dict[str, Any]],
     pillar: str,
@@ -3530,7 +3545,11 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
             title = extraction.get("title") or raw_text.strip()
             extracted_category = extraction.get("category")
             extracted_sub_category = extraction.get("sub_category")
-            category = str(extracted_category).strip() if extracted_category else ASSUMPTION_DEFAULT_CATEGORY
+            framework = playbook.get_5_pillar_framework()
+            category = _match_framework_pillar(
+                str(extracted_category).strip() if extracted_category else None,
+                framework,
+            )
             sub_category = str(extracted_sub_category).strip() if extracted_sub_category else "General"
             confidence_value = extraction.get("confidence", extraction.get("confidence_score", 0))
             try:
@@ -4696,7 +4715,9 @@ def handle_assumption_overflow(ack, body, client, logger):  # noqa: ANN001
         user_id = body["user"]["id"]
 
         if action in {"Now", "Next", "Later"}:
+            horizon = action.lower()
             db_service.update_assumption_lane(int(assumption_id), action)
+            db_service.update_assumption_horizon(int(assumption_id), horizon)
             client.chat_postEphemeral(channel=user_id, user=user_id, text=f"Moved to {action}.")
         elif action == "delete":
             db_service.delete_assumption(int(assumption_id))
@@ -4812,6 +4833,7 @@ def handle_move_assumption_submit(ack, body, client, logger):  # noqa: ANN001
     try:
         lane = body["view"]["state"]["values"]["lane_block"]["lane"]["selected_option"]["value"]
         db_service.update_assumption_lane(int(assumption_id), lane)
+        db_service.update_assumption_horizon(int(assumption_id), lane.lower())
         client.chat_postEphemeral(channel=user_id, user=user_id, text=f"Moved to {lane}.")
         publish_home_tab_async(client, user_id, "roadmap:roadmap")
     except (KeyError, ValueError, SQLAlchemyError):
