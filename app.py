@@ -26,9 +26,13 @@ def start_slack_handler() -> None:
     handler.start()
 
 
+async def run_schema_check() -> None:
+    await asyncio.to_thread(check_and_update_schema)
+
+
 if __name__ == "__main__":
     print("🔧 Checking database schema...")
-    check_and_update_schema()
+    asyncio.run(run_schema_check())
 
     slack_thread = threading.Thread(target=start_slack_handler, daemon=True)
     slack_thread.start()
