@@ -342,15 +342,16 @@ class TestSchemaFixer:
             import config
             from services import schema_fixer
 
-            original_db_url = getattr(config.Config, "DATABASE_URL", None)
+            _sentinel = object()
+            original_db_url = getattr(config.Config, "DATABASE_URL", _sentinel)
             try:
                 config.Config.DATABASE_URL = f"sqlite:///{db_path}"
                 importlib.reload(schema_fixer)
                 from services.schema_fixer import check_and_update_schema as fresh_check
                 fresh_check()  # Should not raise
             finally:
-                if original_db_url is not None:
+                if original_db_url is not _sentinel:
                     config.Config.DATABASE_URL = original_db_url
-                else:
+                elif hasattr(config.Config, "DATABASE_URL"):
                     delattr(config.Config, "DATABASE_URL")
                 importlib.reload(schema_fixer)
