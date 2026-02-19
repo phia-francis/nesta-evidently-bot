@@ -31,11 +31,14 @@ async def run_schema_check() -> None:
 
 
 if __name__ == "__main__":
+    Config.validate()
+
     print("🔧 Checking database schema...")
     asyncio.run(run_schema_check())
 
     slack_thread = threading.Thread(target=start_slack_handler, daemon=True)
     slack_thread.start()
 
+    port = int(os.environ.get("PORT", 3000))
     app = create_app()
-    web.run_app(app, host=Config.HOST, port=Config.PORT)
+    web.run_app(app, host="0.0.0.0", port=port)

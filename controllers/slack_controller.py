@@ -698,7 +698,7 @@ def _build_diagnostic_question_map(
     for pillar_key, pillar_data in framework.items():
         sub_categories = pillar_data.get("sub_categories", {})
         for sub_category, sub_data in sub_categories.items():
-            questions = sub_data.get("questions", [])
+            questions = sub_data if isinstance(sub_data, list) else sub_data.get("questions", [])
             for question in questions:
                 base_id = build_diagnostic_block_id(pillar_key, sub_category, question)
                 question_map[base_id] = (pillar_key, sub_category, question)
@@ -3538,20 +3538,20 @@ def handle_create_assumption(ack, body, client, logger):  # noqa: ANN001
             if extraction.get("error"):
                 extraction = {
                     "title": raw_text.strip(),
-                    "category": "1. VALUE",
-                    "sub_category": "General",
-                    "confidence": 0,
+                    "matched_category": "1. VALUE",
+                    "matched_sub_category": "General",
+                    "estimated_confidence_score": 0,
                 }
             title = extraction.get("title") or raw_text.strip()
-            extracted_category = extraction.get("category")
-            extracted_sub_category = extraction.get("sub_category")
+            extracted_category = extraction.get("matched_category")
+            extracted_sub_category = extraction.get("matched_sub_category")
             framework = playbook.get_5_pillar_framework()
             category = _match_framework_pillar(
                 str(extracted_category).strip() if extracted_category else None,
                 framework,
             )
             sub_category = str(extracted_sub_category).strip() if extracted_sub_category else "General"
-            confidence_value = extraction.get("confidence", extraction.get("confidence_score", 0))
+            confidence_value = extraction.get("estimated_confidence_score", 0)
             try:
                 confidence_score = int(confidence_value)
             except (TypeError, ValueError):

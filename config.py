@@ -1,9 +1,13 @@
+import base64
 import logging
 import os
 from enum import Enum
 
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+
+
+_FALLBACK_ENCRYPTION_KEY = base64.urlsafe_b64encode(b"evidently-dev-fallback-key-32b!").decode("utf-8")
 
 
 def get_encryption_key() -> bytes | None:
@@ -67,6 +71,20 @@ class Config:
         "AI_EXPERIMENT_FALLBACK",
         "Unable to generate experiments right now.",
     )
+
+    @classmethod
+    def validate(cls) -> None:
+        """Validate critical configuration values at startup."""
+        token = cls.SLACK_BOT_TOKEN
+        if not token or not token.startswith("xoxb-"):
+            raise ValueError(
+                "SLACK_BOT_TOKEN is missing or invalid — it must start with 'xoxb-'."
+            )
+        if cls.GOOGLE_TOKEN_ENCRYPTION_KEY is None:
+            logging.warning(
+                "GOOGLE_TOKEN_ENCRYPTION_KEY is missing; using a dev-only fallback key."
+            )
+            cls.GOOGLE_TOKEN_ENCRYPTION_KEY = _FALLBACK_ENCRYPTION_KEY.encode("utf-8")
 
 
 class Brand:

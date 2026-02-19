@@ -130,7 +130,7 @@ def get_diagnostic_modal(
                     "elements": [{"type": "mrkdwn", "text": f"*{sub_category}*"}],
                 }
             )
-            questions = sub_data.get("questions", [])
+            questions = sub_data if isinstance(sub_data, list) else sub_data.get("questions", [])
             for question in questions:
                 base_id = build_diagnostic_block_id(pillar_key, sub_category, question)
                 ai_answer = ai_data.get(base_id, {})

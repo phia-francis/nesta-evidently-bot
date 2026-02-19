@@ -223,7 +223,7 @@ def _get_audit_view(
                     "text": {"type": "mrkdwn", "text": f"*{sub_category}*"},
                 }
             )
-            questions = sub_data.get("questions", [])
+            questions = sub_data if isinstance(sub_data, list) else sub_data.get("questions", [])
             if not questions:
                 blocks.append(
                     {
@@ -332,7 +332,7 @@ def _render_framework_sections(
                     }
                 )
             if not matching_assumptions:
-                questions = sub_data.get("questions", [])
+                questions = sub_data if isinstance(sub_data, list) else sub_data.get("questions", [])
                 prompt_text = "\n".join(questions) if questions else "No diagnostic prompts available."
                 blocks.append(
                     {
