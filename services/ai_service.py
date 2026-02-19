@@ -229,15 +229,22 @@ Return JSON: { "opportunity_needs": {"answer": "...", "confidence": 3}, ... }
             return {"error": "Missing project context."}
         prompt = """
 Analyze the project context.
-1. Extract granular assumptions for specific diagnostic questions (e.g., "Who is the user?").
-2. Extract HIGH-LEVEL strategic plans for the Sub-Categories (e.g., "Value -> Needs").
+1. Extract granular assumptions for specific diagnostic questions.
+2. Extract HIGH-LEVEL strategic plans for each Sub-Category.
+
+Use EXACTLY these Pillar and Sub-Category names:
+- "1. VALUE" -> "Needs & Contribution"
+- "2. GROWTH" -> "Routes to Scale"
+- "3. SUSTAINABILITY" -> "System Integration"
+- "4. IMPACT" -> "Equity & Risk"
+- "5. FEASIBILITY" -> "Capabilities & Timing"
 
 Return JSON:
 {
-  "Value": {
-    "Needs": {
+  "1. VALUE": {
+    "Needs & Contribution": {
        "assumptions": [
-          {"question": "Who is the user?", "answer": "...", "confidence": 3}
+          {"question": "Contribution: How does this intervention directly impact the 2030 Mission Goal?", "answer": "...", "confidence": 3}
        ],
        "roadmap": {
           "now": "Interview 5 parents",
@@ -299,10 +306,11 @@ Return JSON: { "horizon": "now|next|later", "reason": "short explanation" }
         prompt = (
             "Extract the following from the raw text: "
             "1. Core Assumption (Title), "
-            "2. Category (one of: 1. VALUE, 2. GROWTH, 3. SUSTAINABILITY, 4. IMPACT, 5. FEASIBILITY), "
-            "3. Sub-Category (e.g., Needs, Market, Finance), "
-            "4. Confidence Score (1-5). "
-            "Return JSON: {\"title\": \"...\", \"category\": \"1. VALUE\", \"sub_category\": \"Needs\", \"confidence\": 3}."
+            "2. matched_category (one of: 1. VALUE, 2. GROWTH, 3. SUSTAINABILITY, 4. IMPACT, 5. FEASIBILITY), "
+            "3. matched_sub_category (e.g., Needs & Contribution, Routes to Scale, System Integration, Equity & Risk, Capabilities & Timing), "
+            "4. estimated_confidence_score (integer 1-5). "
+            'Return JSON: {"title": "...", "matched_category": "1. VALUE", '
+            '"matched_sub_category": "Needs & Contribution", "estimated_confidence_score": 3}.'
         )
         try:
             response = self.model.generate_content(
@@ -316,9 +324,21 @@ Return JSON: { "horizon": "now|next|later", "reason": "short explanation" }
             if not isinstance(parsed, dict):
                 return {"error": "Invalid AI response."}
             title = parsed.get("title") or parsed.get("assumption") or parsed.get("core_assumption")
-            category = parsed.get("category") or "1. VALUE"
-            sub_category = parsed.get("sub_category") or parsed.get("subcategory") or parsed.get("subCategory")
-            confidence = parsed.get("confidence_score", parsed.get("confidence", 0))
+            category = (
+                parsed.get("matched_category")
+                or parsed.get("category")
+                or "1. VALUE"
+            )
+            sub_category = (
+                parsed.get("matched_sub_category")
+                or parsed.get("sub_category")
+                or parsed.get("subcategory")
+                or parsed.get("subCategory")
+            )
+            confidence = parsed.get(
+                "estimated_confidence_score",
+                parsed.get("confidence_score", parsed.get("confidence", 0)),
+            )
             try:
                 confidence_score = int(confidence)
             except (TypeError, ValueError):
@@ -335,9 +355,9 @@ Return JSON: { "horizon": "now|next|later", "reason": "short explanation" }
                 category = "1. VALUE"
             return {
                 "title": str(title or raw_text).strip(),
-                "category": category,
-                "sub_category": str(sub_category).strip() if sub_category else None,
-                "confidence": confidence_score,
+                "matched_category": category,
+                "matched_sub_category": str(sub_category).strip() if sub_category else None,
+                "estimated_confidence_score": confidence_score,
             }
         except json.JSONDecodeError as exc:
             logger.error("AI Assumption Extraction - Failed to parse JSON", exc_info=True)

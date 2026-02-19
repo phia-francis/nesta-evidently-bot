@@ -5,128 +5,55 @@ from pathlib import Path
 
 FULL_5_PILLAR_FRAMEWORK = {
     "1. VALUE": {
-        "definition": "What needs to be true about user and stakeholder value?",
+        "definition": "How does this specific intervention move the needle on the 2030 Mission Goal?",
         "sub_categories": {
-            "Needs": {
-                "questions": [
-                    "• User Needs: Who is the end user? What needs does your innovation meet?",
-                    "• Pain Points: What difficulty or frustration does it overcome?",
-                    "• Customer: Who will pay? What is their incentive?",
-                ],
-                "roadmap_context": "What do we need to learn about User Needs?",
-            },
-            "Approach": {
-                "questions": [
-                    "• Description: What is the product, service, or process?",
-                    "• User Benefits: How does it meet the needs? What value does it create?",
-                    "• USP: What makes it stand out from the competition?",
-                ],
-                "roadmap_context": "What do we need to learn about our Approach?",
-            },
-        },
+            "Needs & Contribution": [
+                "Contribution: How does this intervention directly impact the 2030 Mission Goal (e.g., halving obesity, reducing carbon emissions)?",
+                "Target Beneficiary: Are we reaching the specific target demographic defined in the Area of Focus (AoF)?",
+                "Evidence Gap: Does this fill a critical evidence gap in our Theory of Change, or are we replicating existing knowledge?"
+            ]
+        }
     },
     "2. GROWTH": {
-        "definition": "What needs to be true about adoption and scaling?",
+        "definition": "What are the routes to adoption and scaling?",
         "sub_categories": {
-            "Market": {
-                "questions": [
-                    "• Size & Trends: What is the target market size?",
-                    "• Barriers: What obstacles make it hard to enter?",
-                    "• Competition: What competes with you?",
-                ],
-                "roadmap_context": "What do we need to learn about the Market?",
-            },
-            "Experience": {
-                "questions": [
-                    "• Discovery: Sales/marketing strategy?",
-                    "• Transaction: Pricing & payment?",
-                    "• User Experience: Usage over time?",
-                ],
-                "roadmap_context": "What do we need to learn about Experience?",
-            },
-        },
+            "Routes to Scale": [
+                "Scaling Mode: Which Nesta scaling mode does this fit: Influencing, Enabling, or Delivering?",
+                "Adoption Levers: What is the specific lever for adoption? (e.g., legislative change, supply chain incentive, behavioral nudge)",
+                "Replicability: Can this model work in a different local authority or context without significant reinvention?"
+            ]
+        }
     },
     "3. SUSTAINABILITY": {
-        "definition": "What needs to be true about funding and sustainability?",
+        "definition": "How does this integrate into the wider system long-term?",
         "sub_categories": {
-            "Finance": {
-                "questions": [
-                    "• Revenue & Cost?",
-                    "• Funding?",
-                    "• Cashflow?",
-                ],
-                "roadmap_context": "What do we need to learn about Finance?",
-            },
-            "IP": {
-                "questions": [
-                    "• New IP?",
-                    "• Existing IP?",
-                    "• Licensing?",
-                ],
-                "roadmap_context": "What do we need to learn about IP?",
-            },
-        },
+            "System Integration": [
+                "System Ownership: Who owns this problem after Nesta steps away? (e.g., Local Authority, NHS, private market)",
+                "Cost-Benefit: Does the intervention save money for the system owner to justify long-term funding?",
+                "Exit Strategy: Is the sustainability plan based on commercial revenue (Venture) or public commissioning (Program)?"
+            ]
+        }
     },
     "4. IMPACT": {
-        "definition": "What needs to be true about intended outcomes?",
+        "definition": "What are the unintended consequences and equity impacts?",
         "sub_categories": {
-            "Risk": {
-                "questions": [
-                    "• Identify Risks?",
-                    "• Assess Impact?",
-                    "• Mitigate?",
-                    "• Performance Metrics?",
-                ],
-                "roadmap_context": "What do we need to learn about Risks?",
-            },
-            "Rules": {
-                "questions": [
-                    "• Freedom to Operate?",
-                    "• Legislation?",
-                    "• Standards?",
-                ],
-                "roadmap_context": "What do we need to learn about Rules?",
-            },
-            "Wider Impact": {
-                "questions": [
-                    "• Economic?",
-                    "• Social?",
-                    "• Environmental?",
-                ],
-                "roadmap_context": "What do we need to learn about Wider Impact?",
-            },
-        },
+            "Equity & Risk": [
+                "Equity Audit: Does this intervention unintentionally widen inequalities?",
+                "Displacement: Does success here negatively impact another part of the system?",
+                "Data Integrity: Can we capture rigorous impact data in a way that satisfies our Mission Progress Indicators?"
+            ]
+        }
     },
     "5. FEASIBILITY": {
-        "definition": "What needs to be true about implementation?",
+        "definition": "Do we have the internal and external capabilities to execute?",
         "sub_categories": {
-            "R&D": {
-                "questions": [
-                    "• Idea Generation?",
-                    "• Prototyping Capabilities?",
-                    "• Technical Challenges?",
-                ],
-                "roadmap_context": "What do we need to learn about R&D?",
-            },
-            "Operations": {
-                "questions": [
-                    "• Skills/People?",
-                    "• Equipment?",
-                    "• Outsourcing?",
-                    "• Stakeholders?",
-                ],
-                "roadmap_context": "What do we need to learn about Operations?",
-            },
-            "Leadership": {
-                "questions": [
-                    "• Champions?",
-                    "• Management Expertise?",
-                    "• Strategy?",
-                ],
-                "roadmap_context": "What do we need to learn about Leadership?",
-            },
-        },
-    },
+            "Capabilities & Timing": [
+                "Partnership Fit: Do we have the right 'Gold Policy Stakeholders' engaged to unblock barriers?",
+                "Internal Capability: Does this require Mission Studio venture building skills or Discovery research skills?",
+                "Political Timing: Is the external policy environment currently receptive to this change?"
+            ]
+        }
+    }
 }
 
 

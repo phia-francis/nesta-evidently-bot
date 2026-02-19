@@ -1,5 +1,4 @@
 import asyncio
-import os
 import threading
 
 from aiohttp import web
@@ -31,6 +30,8 @@ async def run_schema_check() -> None:
 
 
 if __name__ == "__main__":
+    Config.validate()
+
     print("🔧 Checking database schema...")
     asyncio.run(run_schema_check())
 

@@ -6,14 +6,29 @@ from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 
+# Dev-only fallback Fernet key. Generated once via Fernet.generate_key() and
+# hard-coded so it is always a valid Fernet key.
+_FALLBACK_ENCRYPTION_KEY: bytes = b"V0G3W2Kx1oQcJ9VHt-Plu1cWmvMRGsiE9zMDFMvx6FU="
+
+# Validate the fallback key at import time to avoid silent plaintext fallback.
+try:
+    Fernet(_FALLBACK_ENCRYPTION_KEY)
+except ValueError as exc:  # pragma: no cover
+    raise RuntimeError(
+        "Configured _FALLBACK_ENCRYPTION_KEY is not a valid Fernet key."
+    ) from exc
+
+
 def get_encryption_key() -> bytes | None:
     key = os.environ.get("GOOGLE_TOKEN_ENCRYPTION_KEY")
     environment = os.environ.get("ENVIRONMENT", "development").lower()
     if not key:
         if environment == "production":
             raise RuntimeError("GOOGLE_TOKEN_ENCRYPTION_KEY must be set in production.")
-        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is not set; Google tokens will be stored in plaintext.")
-        return None
+        logging.warning(
+            "GOOGLE_TOKEN_ENCRYPTION_KEY is not set; using dev-only fallback key."
+        )
+        return _FALLBACK_ENCRYPTION_KEY
     try:
         key_bytes = key.encode("utf-8")
         Fernet(key_bytes)
@@ -21,8 +36,10 @@ def get_encryption_key() -> bytes | None:
     except ValueError:  # noqa: BLE001
         if environment == "production":
             raise RuntimeError("GOOGLE_TOKEN_ENCRYPTION_KEY is invalid in production.")
-        logging.warning("GOOGLE_TOKEN_ENCRYPTION_KEY is invalid; Google tokens will be stored in plaintext.")
-        return None
+        logging.warning(
+            "GOOGLE_TOKEN_ENCRYPTION_KEY is invalid; using dev-only fallback key."
+        )
+        return _FALLBACK_ENCRYPTION_KEY
 
 load_dotenv()
 
@@ -44,7 +61,7 @@ class Config:
     GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
     GOOGLE_TOKEN_ENCRYPTION_KEY = get_encryption_key()
     OAUTH_STATE_TTL_SECONDS = int(os.environ.get("OAUTH_STATE_TTL_SECONDS", 600))
-    PORT = int(os.environ.get("PORT", 10000))
+    PORT = int(os.environ.get("PORT", 3000))
     OAUTH_PORT = int(os.environ.get("OAUTH_PORT", 10001))
     HOST = os.environ.get("HOST", "0.0.0.0")
     LEADERSHIP_CHANNEL = os.environ.get("LEADERSHIP_CHANNEL", "#leadership-updates")
@@ -67,6 +84,15 @@ class Config:
         "AI_EXPERIMENT_FALLBACK",
         "Unable to generate experiments right now.",
     )
+
+    @classmethod
+    def validate(cls) -> None:
+        """Validate critical configuration values at startup."""
+        token = cls.SLACK_BOT_TOKEN
+        if not token or not token.startswith("xoxb-"):
+            raise ValueError(
+                "SLACK_BOT_TOKEN is missing or invalid — it must start with 'xoxb-'."
+            )
 
 
 class Brand:
