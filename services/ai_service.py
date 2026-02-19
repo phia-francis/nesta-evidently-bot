@@ -229,15 +229,22 @@ Return JSON: { "opportunity_needs": {"answer": "...", "confidence": 3}, ... }
             return {"error": "Missing project context."}
         prompt = """
 Analyze the project context.
-1. Extract granular assumptions for specific diagnostic questions (e.g., "Who is the user?").
-2. Extract HIGH-LEVEL strategic plans for the Sub-Categories (e.g., "Value -> Needs").
+1. Extract granular assumptions for specific diagnostic questions.
+2. Extract HIGH-LEVEL strategic plans for each Sub-Category.
+
+Use EXACTLY these Pillar and Sub-Category names:
+- "1. VALUE" -> "Needs & Contribution"
+- "2. GROWTH" -> "Routes to Scale"
+- "3. SUSTAINABILITY" -> "System Integration"
+- "4. IMPACT" -> "Equity & Risk"
+- "5. FEASIBILITY" -> "Capabilities & Timing"
 
 Return JSON:
 {
-  "Value": {
-    "Needs": {
+  "1. VALUE": {
+    "Needs & Contribution": {
        "assumptions": [
-          {"question": "Who is the user?", "answer": "...", "confidence": 3}
+          {"question": "Contribution: How does this intervention directly impact the 2030 Mission Goal?", "answer": "...", "confidence": 3}
        ],
        "roadmap": {
           "now": "Interview 5 parents",

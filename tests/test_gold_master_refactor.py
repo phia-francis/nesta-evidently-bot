@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from cryptography.fernet import Fernet
 import google.generativeai as genai
 
 
@@ -111,19 +112,26 @@ class TestConfigValidation:
         finally:
             Config.SLACK_BOT_TOKEN = original
 
-    def test_validate_sets_fallback_encryption_key(self):
-        from config import Config
+    def test_get_encryption_key_returns_fallback_in_dev(self):
+        from config import get_encryption_key, _FALLBACK_ENCRYPTION_KEY
 
-        original_token = Config.SLACK_BOT_TOKEN
-        original_key = Config.GOOGLE_TOKEN_ENCRYPTION_KEY
+        original_env = os.environ.pop("GOOGLE_TOKEN_ENCRYPTION_KEY", None)
+        original_environment = os.environ.get("ENVIRONMENT")
         try:
-            Config.SLACK_BOT_TOKEN = "xoxb-test-token"
-            Config.GOOGLE_TOKEN_ENCRYPTION_KEY = None
-            Config.validate()
-            assert Config.GOOGLE_TOKEN_ENCRYPTION_KEY is not None
+            os.environ.pop("ENVIRONMENT", None)
+            key = get_encryption_key()
+            assert key == _FALLBACK_ENCRYPTION_KEY
         finally:
-            Config.SLACK_BOT_TOKEN = original_token
-            Config.GOOGLE_TOKEN_ENCRYPTION_KEY = original_key
+            if original_env is not None:
+                os.environ["GOOGLE_TOKEN_ENCRYPTION_KEY"] = original_env
+            if original_environment is not None:
+                os.environ["ENVIRONMENT"] = original_environment
+
+    def test_fallback_key_is_valid_fernet(self):
+        from config import _FALLBACK_ENCRYPTION_KEY
+
+        # Should not raise — the key must be a valid Fernet key
+        Fernet(_FALLBACK_ENCRYPTION_KEY)
 
 
 # ---------------------------------------------------------------------------
@@ -328,10 +336,21 @@ class TestSchemaFixer:
         # Should not raise on a fresh SQLite database
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = os.path.join(tmpdir, "test.db")
-            with patch.dict(os.environ, {"DATABASE_URL": f"sqlite:///{db_path}"}):
-                # Import fresh to pick up new URL
-                import importlib
-                from services import schema_fixer
+            # Ensure Config.DATABASE_URL matches the patched environment and
+            # reload schema_fixer so it picks up the updated configuration.
+            import importlib
+            import config
+            from services import schema_fixer
+
+            original_db_url = getattr(config.Config, "DATABASE_URL", None)
+            try:
+                config.Config.DATABASE_URL = f"sqlite:///{db_path}"
                 importlib.reload(schema_fixer)
                 from services.schema_fixer import check_and_update_schema as fresh_check
                 fresh_check()  # Should not raise
+            finally:
+                if original_db_url is not None:
+                    config.Config.DATABASE_URL = original_db_url
+                else:
+                    delattr(config.Config, "DATABASE_URL")
+                importlib.reload(schema_fixer)
