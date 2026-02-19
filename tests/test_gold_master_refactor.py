@@ -36,11 +36,11 @@ class TestFrameworkStructure:
         from services.playbook_service import FULL_5_PILLAR_FRAMEWORK
 
         for pillar_key, pillar_data in FULL_5_PILLAR_FRAMEWORK.items():
-            for sub_cat_name, questions in pillar_data["sub_categories"].items():
-                assert isinstance(questions, list), (
-                    f"{pillar_key} -> {sub_cat_name} should be a list, got {type(questions)}"
+            for sub_cat_name, sub_category_questions in pillar_data["sub_categories"].items():
+                assert isinstance(sub_category_questions, list), (
+                    f"{pillar_key} -> {sub_cat_name} should be a list, got {type(sub_category_questions)}"
                 )
-                for question in questions:
+                for question in sub_category_questions:
                     assert isinstance(question, str), (
                         f"Questions in {pillar_key} -> {sub_cat_name} should be strings"
                     )

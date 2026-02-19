@@ -7,7 +7,7 @@ from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 
-_FALLBACK_ENCRYPTION_KEY = base64.urlsafe_b64encode(b"evidently-dev-fallback-key-32b!").decode("utf-8")
+_FALLBACK_ENCRYPTION_KEY = base64.urlsafe_b64encode(b"evidently-dev-fallback-key-32b!")
 
 
 def get_encryption_key() -> bytes | None:
@@ -81,10 +81,14 @@ class Config:
                 "SLACK_BOT_TOKEN is missing or invalid — it must start with 'xoxb-'."
             )
         if cls.GOOGLE_TOKEN_ENCRYPTION_KEY is None:
+            if cls.ENVIRONMENT.lower() == "production":
+                raise ValueError(
+                    "GOOGLE_TOKEN_ENCRYPTION_KEY must be set in production."
+                )
             logging.warning(
                 "GOOGLE_TOKEN_ENCRYPTION_KEY is missing; using a dev-only fallback key."
             )
-            cls.GOOGLE_TOKEN_ENCRYPTION_KEY = _FALLBACK_ENCRYPTION_KEY.encode("utf-8")
+            cls.GOOGLE_TOKEN_ENCRYPTION_KEY = _FALLBACK_ENCRYPTION_KEY
 
 
 class Brand:
