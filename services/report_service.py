@@ -118,28 +118,34 @@ class ReportService:
             return "🚨 Focus: Validation. Review these low-confidence assumptions:\n" + "\n".join(agenda_lines)
 
         if flow_stage == "plan":
-            now_items = [
-                assumption.get("title", "Untitled")
-                for assumption in assumptions
-                if (assumption.get("horizon") or "").lower() == "now"
-                or (assumption.get("lane") or "").lower() == "now"
-            ]
-            if not now_items:
-                now_plans = [
-                    plan.get("plan_now", "").strip()
-                    for plan in roadmap_plans
-                    if plan.get("plan_now")
-                ]
-                now_items = [item for item in now_plans if item]
-            if not now_items:
-                return "🗺️ Focus: Prioritization. No NOW horizon items defined yet."
-            agenda_lines = [f"- {item}" for item in now_items]
-            return "🗺️ Focus: Prioritization. Review NOW horizon items:\n" + "\n".join(agenda_lines)
+            if not roadmap_plans:
+                return "🗺️ Focus: Prioritization. No roadmap plans defined yet."
+            agenda_lines = []
+            for plan in roadmap_plans:
+                label = plan.get("sub_category") or plan.get("pillar") or "Untitled"
+                plan_now = (plan.get("plan_now") or "").strip()
+                plan_next = (plan.get("plan_next") or "").strip()
+                plan_later = (plan.get("plan_later") or "").strip()
+                parts = []
+                if plan_now:
+                    parts.append(f"Now: {plan_now}")
+                if plan_next:
+                    parts.append(f"Next: {plan_next}")
+                if plan_later:
+                    parts.append(f"Later: {plan_later}")
+                detail = " | ".join(parts) if parts else "No details"
+                agenda_lines.append(f"- {label} — {detail}")
+            return "🗺️ Focus: Prioritization. Review roadmap plans:\n" + "\n".join(agenda_lines)
 
+        active_experiments = [
+            experiment
+            for experiment in experiments
+            if (experiment.get("status") or "").lower() not in ("completed", "archived")
+        ]
         live_experiments = [
             f"- {experiment.get('title', 'Untitled')} (Status: {experiment.get('status', 'Planning')})"
-            for experiment in experiments
+            for experiment in active_experiments
         ]
         if not live_experiments:
-            return "🧪 Focus: Results. No live experiments logged yet."
-        return "🧪 Focus: Results. Review live experiments:\n" + "\n".join(live_experiments)
+            return "🧪 Focus: Results. No active experiments logged yet."
+        return "🧪 Focus: Results. Review active experiments:\n" + "\n".join(live_experiments)

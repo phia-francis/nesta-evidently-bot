@@ -325,6 +325,141 @@ class TestModals:
 
 
 # ---------------------------------------------------------------------------
+# Task 5 — Context-Aware Reporting (generate_meeting_agenda)
+# ---------------------------------------------------------------------------
+
+
+class _FakeDbService:
+    """Minimal stub that returns a project dict configured per test."""
+
+    def __init__(self, project: dict | None):
+        self._project = project
+
+    def get_project(self, project_id: int) -> dict | None:  # noqa: ARG002
+        return self._project
+
+    def get_decision_vote_summary(self, assumption_id):  # noqa: ARG002
+        return {"count": 0}
+
+
+class TestMeetingAgenda:
+    @staticmethod
+    def _make_service(project: dict | None):
+        from services.report_service import ReportService
+
+        db = _FakeDbService(project)
+        ai = None  # not used by generate_meeting_agenda
+        return ReportService.__new__(ReportService), db
+
+    @classmethod
+    def _build(cls, project: dict | None):
+        svc, db = cls._make_service(project)
+        svc.db_service = db
+        svc.ai_service = None
+        return svc
+
+    # -- no project -------------------------------------------------------
+
+    def test_no_project_returns_default_agenda(self):
+        svc = self._build(None)
+        result = svc.generate_meeting_agenda(999)
+        assert "Welcome" in result
+
+    # -- audit stage ------------------------------------------------------
+
+    def test_audit_no_low_confidence(self):
+        project = {"flow_stage": "audit", "assumptions": [], "roadmap_plans": [], "experiments": []}
+        svc = self._build(project)
+        result = svc.generate_meeting_agenda(1)
+        assert "Validation" in result
+
+    def test_audit_shows_low_confidence_assumptions(self):
+        project = {
+            "flow_stage": "audit",
+            "assumptions": [
+                {"title": "Risky bet", "confidence_score": 1},
+                {"title": "Solid bet", "confidence_score": 4},
+                {"title": "Medium risk", "confidence_score": 2},
+            ],
+            "roadmap_plans": [],
+            "experiments": [],
+        }
+        svc = self._build(project)
+        result = svc.generate_meeting_agenda(1)
+        assert "Risky bet" in result
+        assert "Medium risk" in result
+        assert "Solid bet" not in result
+
+    # -- plan stage -------------------------------------------------------
+
+    def test_plan_no_roadmap_plans(self):
+        project = {"flow_stage": "plan", "assumptions": [], "roadmap_plans": [], "experiments": []}
+        svc = self._build(project)
+        result = svc.generate_meeting_agenda(1)
+        assert "No roadmap plans" in result
+
+    def test_plan_shows_roadmap_plans(self):
+        project = {
+            "flow_stage": "plan",
+            "assumptions": [],
+            "roadmap_plans": [
+                {"pillar": "1. VALUE", "sub_category": "Needs", "plan_now": "Interview users", "plan_next": "Build MVP", "plan_later": ""},
+            ],
+            "experiments": [],
+        }
+        svc = self._build(project)
+        result = svc.generate_meeting_agenda(1)
+        assert "Needs" in result
+        assert "Interview users" in result
+        assert "Build MVP" in result
+
+    # -- action stage -----------------------------------------------------
+
+    def test_action_no_active_experiments(self):
+        project = {
+            "flow_stage": "action",
+            "assumptions": [],
+            "roadmap_plans": [],
+            "experiments": [{"title": "Done exp", "status": "completed"}],
+        }
+        svc = self._build(project)
+        result = svc.generate_meeting_agenda(1)
+        assert "No active experiments" in result
+
+    def test_action_shows_active_experiments(self):
+        project = {
+            "flow_stage": "action",
+            "assumptions": [],
+            "roadmap_plans": [],
+            "experiments": [
+                {"title": "Running exp", "status": "running"},
+                {"title": "Planned exp", "status": "planning"},
+                {"title": "Finished exp", "status": "completed"},
+            ],
+        }
+        svc = self._build(project)
+        result = svc.generate_meeting_agenda(1)
+        assert "Running exp" in result
+        assert "Planned exp" in result
+        assert "Finished exp" not in result
+
+    def test_action_filters_archived_experiments(self):
+        project = {
+            "flow_stage": "action",
+            "assumptions": [],
+            "roadmap_plans": [],
+            "experiments": [
+                {"title": "Active exp", "status": "running"},
+                {"title": "Archived exp", "status": "archived"},
+            ],
+        }
+        svc = self._build(project)
+        result = svc.generate_meeting_agenda(1)
+        assert "Active exp" in result
+        assert "Archived exp" not in result
+
+
+# ---------------------------------------------------------------------------
 # Task 2b — Schema fixer
 # ---------------------------------------------------------------------------
 
