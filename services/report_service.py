@@ -142,10 +142,10 @@ class ReportService:
             for experiment in experiments
             if (experiment.get("status") or "").lower() not in ("completed", "archived")
         ]
-        live_experiments = [
+        agenda_lines = [
             f"- {experiment.get('title', 'Untitled')} (Status: {experiment.get('status', 'Planning')})"
             for experiment in active_experiments
         ]
-        if not live_experiments:
+        if not agenda_lines:
             return "🧪 Focus: Results. No active experiments logged yet."
-        return "🧪 Focus: Results. Review active experiments:\n" + "\n".join(live_experiments)
+        return "🧪 Focus: Results. Review active experiments:\n" + "\n".join(agenda_lines)
