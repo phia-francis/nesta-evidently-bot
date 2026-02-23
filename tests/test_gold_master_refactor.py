@@ -348,8 +348,8 @@ class TestMeetingAgenda:
         from services.report_service import ReportService
 
         db = _FakeDbService(project)
-        ai = None  # not used by generate_meeting_agenda
-        return ReportService.__new__(ReportService), db
+        svc = ReportService(ai_service=None, db_service=db)
+        return svc, db
 
     @classmethod
     def _build(cls, project: dict | None):
