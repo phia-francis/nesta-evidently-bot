@@ -1255,25 +1255,27 @@ def auto_fill_from_evidence(ack, body, client, logger):  # noqa: ANN001
                 text="No readable evidence found in the connected files.",
             )
             return
-        draft = ai_service.extract_ocp_from_text(context_text)
+        draft = ai_service.extract_5_pillar_diagnostic(context_text)
         if draft.get("error"):
             client.chat_postEphemeral(
                 channel=user_id,
                 user=user_id,
-                text="I couldn't generate an OCP draft from that evidence yet.",
+                text="I couldn't generate a diagnostic draft from that evidence yet.",
             )
             return
-        description = (
-            "Opportunity:\n"
-            f"User Needs: {draft.get('Opportunity', {}).get('User Needs', '')}\n"
-            f"Market Size: {draft.get('Opportunity', {}).get('Market Size', '')}\n\n"
-            "Capability:\n"
-            f"Resources: {draft.get('Capability', {}).get('Resources', '')}\n"
-            f"Partners: {draft.get('Capability', {}).get('Partners', '')}\n\n"
-            "Progress:\n"
-            f"Solution Description: {draft.get('Progress', {}).get('Solution Description', '')}\n"
-            f"Unique Selling Point: {draft.get('Progress', {}).get('Unique Selling Point', '')}"
-        ).strip()
+        sections: list[str] = []
+        for pillar_key, pillar_data in draft.items():
+            if not isinstance(pillar_data, dict):
+                continue
+            for sub_cat, sub_data in pillar_data.items():
+                if not isinstance(sub_data, dict):
+                    continue
+                for assumption in sub_data.get("assumptions", []):
+                    q = assumption.get("question", "")
+                    a = assumption.get("answer", "")
+                    if q and a:
+                        sections.append(f"{pillar_key} — {sub_cat}\n{q}: {a}")
+        description = "\n\n".join(sections).strip() if sections else ""
         db_service.update_project_details(
             project_id=project["id"],
             name=project.get("name", ""),
@@ -1281,13 +1283,13 @@ def auto_fill_from_evidence(ack, body, client, logger):  # noqa: ANN001
             mission=project.get("mission", ""),
         )
         insights = draft.get("Insights") or []
-        insights_text = "\n- ".join(insights)
-        if insights_text:
-            messenger_service.post_ephemeral(
-                channel=user_id,
-                user=user_id,
-                text=f"✅ Auto-fill complete. Insights:\n- {insights_text}",
-            )
+        insights_text = "\n- ".join(insights) if insights else ""
+        message = f"✅ Auto-fill complete. Insights:\n- {insights_text}" if insights_text else "✅ Auto-fill complete."
+        messenger_service.post_ephemeral(
+            channel=user_id,
+            user=user_id,
+            text=message,
+        )
         publish_home_tab_async(client, user_id, "overview")
     except Exception as exc:  # noqa: BLE001
         logger.error("Failed to auto-fill from evidence", exc_info=True)
