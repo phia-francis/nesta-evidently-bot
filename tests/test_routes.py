@@ -47,12 +47,12 @@ async def test_google_callback_missing_params_returns_400():
 
 @pytest.mark.asyncio
 async def test_slack_events_route_exists():
-    """POST /slack/events should not return 404."""
+    """POST /slack/events should return a controlled client error (route exists)."""
     app = _make_app()
     server = TestServer(app)
     async with TestClient(server) as client:
         resp = await client.post("/slack/events", json={})
-        assert resp.status != 404
+        assert resp.status in (400, 401)
 
 
 @pytest.mark.asyncio

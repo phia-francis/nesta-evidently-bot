@@ -15,10 +15,31 @@ from services.google_service import GoogleService
 def _bolt_resp_to_aiohttp(bolt_resp: BoltResponse) -> web.Response:
     """Convert a Bolt response to an aiohttp response."""
     body = bolt_resp.body or ""
-    content_type = "application/json" if body.startswith("{") else "text/plain"
-    return web.Response(status=bolt_resp.status, body=body, content_type=content_type)
+    headers = bolt_resp.headers or {}
 
+    # Prefer an explicit content type from the Bolt response headers, if present.
+    content_type = headers.get("content-type") or headers.get("Content-Type")
 
+    # If no content type is specified, fall back to a simple heuristic for string bodies.
+    if content_type is None and isinstance(body, str):
+        stripped = body.lstrip()
+        content_type = "application/json" if stripped.startswith("{") else "text/plain"
+
+    # For bytes-like bodies, use the `body` parameter; for strings, use `text`.
+    if isinstance(body, (bytes, bytearray, memoryview)):
+        return web.Response(
+            status=bolt_resp.status,
+            body=body,
+            headers=headers,
+            content_type=content_type,
+        )
+    else:
+        return web.Response(
+            status=bolt_resp.status,
+            text=str(body),
+            headers=headers,
+            content_type=content_type,
+        )
 def create_web_app(
     db_service: DbService,
     google_service: GoogleService,
@@ -36,7 +57,10 @@ def create_web_app(
             try:
                 payload = json.loads(body)
                 if payload.get("type") == "url_verification":
-                    return web.Response(text=payload["challenge"], content_type="text/plain")
+                    challenge = payload.get("challenge")
+                    if not isinstance(challenge, str):
+                        return web.Response(text="Missing challenge", status=400)
+                    return web.Response(text=challenge, content_type="text/plain")
             except json.JSONDecodeError:
                 pass
 
