@@ -1,5 +1,5 @@
 import asyncio
-import threading
+import os
 
 from aiohttp import web
 from slack_bolt.adapter.socket_mode import SocketModeHandler
@@ -17,12 +17,8 @@ def create_app() -> web.Application:
         google_service=google_service,
         handle_asana_webhook=handle_asana_webhook,
         logger=logger,
+        slack_app=slack_app,
     )
-
-
-def start_slack_handler() -> None:
-    handler = SocketModeHandler(slack_app, Config.SLACK_APP_TOKEN)
-    handler.start()
 
 
 async def run_schema_check() -> None:
@@ -35,8 +31,7 @@ if __name__ == "__main__":
     print("🔧 Checking database schema...")
     asyncio.run(run_schema_check())
 
-    slack_thread = threading.Thread(target=start_slack_handler, daemon=True)
-    slack_thread.start()
-
-    app = create_app()
-    web.run_app(app, host=Config.HOST, port=Config.PORT)
+    if os.environ.get("USE_SOCKET_MODE", "false").lower() == "true":
+        SocketModeHandler(slack_app, Config.SLACK_APP_TOKEN).start()
+    else:
+        web.run_app(create_app(), host=Config.HOST, port=Config.PORT)

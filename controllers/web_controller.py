@@ -1,11 +1,21 @@
-from typing import Callable
 import asyncio
+from typing import Callable
 
 from aiohttp import web
+from slack_bolt import App
+from slack_bolt.request import BoltRequest
+from slack_bolt.response import BoltResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from services.db_service import DbService
 from services.google_service import GoogleService
+
+
+def _bolt_resp_to_aiohttp(bolt_resp: BoltResponse) -> web.Response:
+    """Convert a Bolt response to an aiohttp response."""
+    body = bolt_resp.body or ""
+    content_type = "application/json" if body.startswith("{") else "text/plain"
+    return web.Response(status=bolt_resp.status, body=body, content_type=content_type)
 
 
 def create_web_app(
@@ -13,8 +23,15 @@ def create_web_app(
     google_service: GoogleService,
     handle_asana_webhook: Callable[[web.Request], web.Response],
     logger,
+    slack_app: App,
 ) -> web.Application:
     web_app = web.Application()
+
+    async def slack_events(request: web.Request) -> web.Response:
+        body = await request.text()
+        bolt_req = BoltRequest(body=body, query=request.query_string, headers=dict(request.headers))
+        bolt_resp = await asyncio.to_thread(slack_app.dispatch, bolt_req)
+        return _bolt_resp_to_aiohttp(bolt_resp)
 
     async def health_check(request: web.Request) -> web.Response:
         return web.json_response({"status": "ok"})
@@ -56,6 +73,7 @@ def create_web_app(
 
     web_app.router.add_get("/", health_check)
     web_app.router.add_get("/healthz", health_check)
+    web_app.router.add_post("/slack/events", slack_events)
     web_app.router.add_post("/asana/webhook", handle_asana_webhook)
     web_app.router.add_get("/auth/callback/google", google_callback)
     return web_app
