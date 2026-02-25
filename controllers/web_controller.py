@@ -1,20 +1,84 @@
-from typing import Callable
 import asyncio
+import json
+from typing import Callable
 
 from aiohttp import web
+from slack_bolt import App
+from slack_bolt.request import BoltRequest
+from slack_bolt.response import BoltResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from services.db_service import DbService
 from services.google_service import GoogleService
 
 
+def _bolt_resp_to_aiohttp(bolt_resp: BoltResponse) -> web.Response:
+    """Convert a Bolt response to an aiohttp response."""
+    body = bolt_resp.body or ""
+
+    # Bolt stores header values as lists; flatten to first value for aiohttp.
+    raw_headers = bolt_resp.headers or {}
+    headers = {}
+    content_type = None
+    for key, val in raw_headers.items():
+        first = val[0] if isinstance(val, list) else val
+        if key.lower() == "content-type":
+            # aiohttp forbids charset in content_type param; strip it.
+            content_type = first.split(";")[0].strip()
+        else:
+            headers[key] = first
+
+    # If no content type is specified, fall back to a simple heuristic for string bodies.
+    if content_type is None and isinstance(body, str):
+        stripped = body.lstrip()
+        content_type = "application/json" if stripped.startswith("{") else "text/plain"
+
+    # For bytes-like bodies, use the `body` parameter; for strings, use `text`.
+    if isinstance(body, (bytes, bytearray, memoryview)):
+        return web.Response(
+            status=bolt_resp.status,
+            body=body,
+            headers=headers,
+            content_type=content_type,
+        )
+    else:
+        return web.Response(
+            status=bolt_resp.status,
+            text=str(body),
+            headers=headers,
+            content_type=content_type,
+        )
 def create_web_app(
     db_service: DbService,
     google_service: GoogleService,
     handle_asana_webhook: Callable[[web.Request], web.Response],
     logger,
+    slack_app: App,
 ) -> web.Application:
     web_app = web.Application()
+
+    async def slack_events_handler(request: web.Request) -> web.Response:
+        """Handle Slack URL verification explicitly, then delegate to Bolt."""
+        try:
+            body = await request.text()
+
+            try:
+                payload = json.loads(body)
+                if payload.get("type") == "url_verification":
+                    challenge = payload.get("challenge")
+                    if not isinstance(challenge, str):
+                        return web.Response(text="Missing challenge", status=400)
+                    return web.Response(text=challenge, content_type="text/plain")
+            except json.JSONDecodeError:
+                pass
+
+            bolt_req = BoltRequest(body=body, query=request.query_string, headers=dict(request.headers))
+            bolt_resp = await asyncio.to_thread(slack_app.dispatch, bolt_req)
+            return _bolt_resp_to_aiohttp(bolt_resp)
+
+        except Exception:
+            logger.exception("Error handling Slack event")
+            return web.Response(text="Internal Server Error", status=500)
 
     async def health_check(request: web.Request) -> web.Response:
         return web.json_response({"status": "ok"})
@@ -56,6 +120,7 @@ def create_web_app(
 
     web_app.router.add_get("/", health_check)
     web_app.router.add_get("/healthz", health_check)
+    web_app.router.add_post("/slack/events", slack_events_handler)
     web_app.router.add_post("/asana/webhook", handle_asana_webhook)
     web_app.router.add_get("/auth/callback/google", google_callback)
     return web_app
