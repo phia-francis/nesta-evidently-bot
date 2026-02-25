@@ -1,4 +1,5 @@
 import asyncio
+import json
 from typing import Callable
 
 from aiohttp import web
@@ -27,11 +28,25 @@ def create_web_app(
 ) -> web.Application:
     web_app = web.Application()
 
-    async def slack_events(request: web.Request) -> web.Response:
-        body = await request.text()
-        bolt_req = BoltRequest(body=body, query=request.query_string, headers=dict(request.headers))
-        bolt_resp = await asyncio.to_thread(slack_app.dispatch, bolt_req)
-        return _bolt_resp_to_aiohttp(bolt_resp)
+    async def slack_events_handler(request: web.Request) -> web.Response:
+        """Handle Slack URL verification explicitly, then delegate to Bolt."""
+        try:
+            body = await request.text()
+
+            try:
+                payload = json.loads(body)
+                if payload.get("type") == "url_verification":
+                    return web.Response(text=payload["challenge"], content_type="text/plain")
+            except json.JSONDecodeError:
+                pass
+
+            bolt_req = BoltRequest(body=body, query=request.query_string, headers=dict(request.headers))
+            bolt_resp = await asyncio.to_thread(slack_app.dispatch, bolt_req)
+            return _bolt_resp_to_aiohttp(bolt_resp)
+
+        except Exception:
+            logger.exception("Error handling Slack event")
+            return web.Response(text="Internal Server Error", status=500)
 
     async def health_check(request: web.Request) -> web.Response:
         return web.json_response({"status": "ok"})
@@ -73,7 +88,7 @@ def create_web_app(
 
     web_app.router.add_get("/", health_check)
     web_app.router.add_get("/healthz", health_check)
-    web_app.router.add_post("/slack/events", slack_events)
+    web_app.router.add_post("/slack/events", slack_events_handler)
     web_app.router.add_post("/asana/webhook", handle_asana_webhook)
     web_app.router.add_get("/auth/callback/google", google_callback)
     return web_app

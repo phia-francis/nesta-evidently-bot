@@ -53,3 +53,18 @@ async def test_slack_events_route_exists():
     async with TestClient(server) as client:
         resp = await client.post("/slack/events", json={})
         assert resp.status != 404
+
+
+@pytest.mark.asyncio
+async def test_slack_url_verification_returns_challenge():
+    """POST /slack/events with url_verification should echo the challenge."""
+    app = _make_app()
+    server = TestServer(app)
+    async with TestClient(server) as client:
+        resp = await client.post(
+            "/slack/events",
+            json={"type": "url_verification", "challenge": "test_challenge_value"},
+        )
+        assert resp.status == 200
+        text = await resp.text()
+        assert text == "test_challenge_value"
