@@ -252,7 +252,10 @@ Return JSON:
           "later": "National rollout"
        }
     }
-  }
+  },
+  "Insights": [
+     "Based on the 'Test & Learn Playbook', I recommend a [Method Name] because [Reason]."
+  ]
 }
 """
         try:

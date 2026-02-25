@@ -118,6 +118,8 @@ class Brand:
 
 
 class Category(Enum):
-    OPPORTUNITY = "opportunity"
-    CAPABILITY = "capability"
-    PROGRESS = "progress"
+    VALUE = "1. VALUE"
+    GROWTH = "2. GROWTH"
+    SUSTAINABILITY = "3. SUSTAINABILITY"
+    IMPACT = "4. IMPACT"
+    FEASIBILITY = "5. FEASIBILITY"
