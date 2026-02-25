@@ -1,9 +1,6 @@
 import asyncio
-import os
-import threading
 
 from aiohttp import web
-from slack_bolt.adapter.socket_mode import SocketModeHandler
 
 from config import Config
 from controllers.slack_controller import app as slack_app
@@ -28,14 +25,5 @@ async def run_schema_check() -> None:
 
 if __name__ == "__main__":
     Config.validate()
-
-    print("🔧 Checking database schema...")
     asyncio.run(run_schema_check())
-
-    if os.environ.get("USE_SOCKET_MODE", "false").lower() == "true":
-        # Start Socket Mode in a background thread so the web server
-        # (health checks, webhooks, OAuth callbacks) remains available.
-        handler = SocketModeHandler(slack_app, Config.SLACK_APP_TOKEN)
-        threading.Thread(target=handler.start, daemon=True).start()
-
     web.run_app(create_app(), host=Config.HOST, port=Config.PORT)
