@@ -15,10 +15,18 @@ from services.google_service import GoogleService
 def _bolt_resp_to_aiohttp(bolt_resp: BoltResponse) -> web.Response:
     """Convert a Bolt response to an aiohttp response."""
     body = bolt_resp.body or ""
-    headers = bolt_resp.headers or {}
 
-    # Prefer an explicit content type from the Bolt response headers, if present.
-    content_type = headers.get("content-type") or headers.get("Content-Type")
+    # Bolt stores header values as lists; flatten to first value for aiohttp.
+    raw_headers = bolt_resp.headers or {}
+    headers = {}
+    content_type = None
+    for key, val in raw_headers.items():
+        first = val[0] if isinstance(val, list) else val
+        if key.lower() == "content-type":
+            # aiohttp forbids charset in content_type param; strip it.
+            content_type = first.split(";")[0].strip()
+        else:
+            headers[key] = first
 
     # If no content type is specified, fall back to a simple heuristic for string bodies.
     if content_type is None and isinstance(body, str):
