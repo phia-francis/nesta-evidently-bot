@@ -693,3 +693,56 @@ def change_stage_modal(current_stage: str) -> dict:
             }
         ],
     }
+
+
+def get_triage_wizard_modal(project_id: int) -> dict:
+    return {
+        "type": "modal",
+        "callback_id": "save_triage_submission",
+        "private_metadata": str(project_id),
+        "title": {"type": "plain_text", "text": "Configure Project Context"},
+        "submit": {"type": "plain_text", "text": "Save & Apply"},
+        "blocks": [
+            {
+                "type": "input",
+                "block_id": "output_type",
+                "label": {"type": "plain_text", "text": "What is the primary output?"},
+                "element": {
+                    "type": "radio_buttons",
+                    "action_id": "output_type_value",
+                    "options": [
+                        {"text": {"type": "plain_text", "text": "Policy Influence"}, "value": "policy"},
+                        {"text": {"type": "plain_text", "text": "Service Delivery"}, "value": "service"},
+                        {"text": {"type": "plain_text", "text": "Digital Product"}, "value": "product"},
+                    ],
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "sustainability_model",
+                "label": {"type": "plain_text", "text": "What is the sustainability model?"},
+                "element": {
+                    "type": "radio_buttons",
+                    "action_id": "sustainability_model_value",
+                    "options": [
+                        {"text": {"type": "plain_text", "text": "Public / Grant Funded"}, "value": "public"},
+                        {"text": {"type": "plain_text", "text": "Commercial / Revenue"}, "value": "commercial"},
+                    ],
+                },
+            },
+            {
+                "type": "input",
+                "block_id": "specific_components",
+                "optional": True,
+                "label": {"type": "plain_text", "text": "Any specific components? (optional)"},
+                "element": {
+                    "type": "checkboxes",
+                    "action_id": "specific_components_value",
+                    "options": [
+                        {"text": {"type": "plain_text", "text": "Tech / Hardware"}, "value": "digital"},
+                        {"text": {"type": "plain_text", "text": "Data Science"}, "value": "data"},
+                    ],
+                },
+            },
+        ],
+    }

@@ -65,6 +65,7 @@ def check_and_update_schema() -> None:
             _add_column_if_missing(connection, "projects", "flow_stage", "VARCHAR(50)", "audit")
             _add_column_if_missing(connection, "projects", "mission", "TEXT")
             _add_column_if_missing(connection, "projects", "dashboard_message_ts", "VARCHAR(50)")
+            _add_column_if_missing(connection, "projects", "context_tags", "JSON", "[]")
 
         if "assumptions" in table_names:
             _add_column_if_missing(connection, "assumptions", "category", "TEXT")

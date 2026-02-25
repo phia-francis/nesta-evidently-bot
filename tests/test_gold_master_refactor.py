@@ -37,11 +37,12 @@ class TestFrameworkStructure:
         from services.playbook_service import FULL_5_PILLAR_FRAMEWORK
 
         for pillar_key, pillar_data in FULL_5_PILLAR_FRAMEWORK.items():
-            for sub_cat_name, sub_category_questions in pillar_data["sub_categories"].items():
-                assert isinstance(sub_category_questions, list), (
-                    f"{pillar_key} -> {sub_cat_name} should be a list, got {type(sub_category_questions)}"
+            for sub_cat_name, sub_category_data in pillar_data["sub_categories"].items():
+                questions = sub_category_data if isinstance(sub_category_data, list) else sub_category_data.get("questions", [])
+                assert isinstance(questions, list), (
+                    f"{pillar_key} -> {sub_cat_name} questions should be a list, got {type(questions)}"
                 )
-                for question in sub_category_questions:
+                for question in questions:
                     assert isinstance(question, str), (
                         f"Questions in {pillar_key} -> {sub_cat_name} should be strings"
                     )
@@ -56,14 +57,16 @@ class TestFrameworkStructure:
 
         sub_cats = FULL_5_PILLAR_FRAMEWORK["1. VALUE"]["sub_categories"]
         assert "Needs & Contribution" in sub_cats
-        assert len(sub_cats["Needs & Contribution"]) == 3
+        questions = sub_cats["Needs & Contribution"]["questions"]
+        assert len(questions) == 3
 
     def test_growth_pillar_sub_category(self):
         from services.playbook_service import FULL_5_PILLAR_FRAMEWORK
 
         sub_cats = FULL_5_PILLAR_FRAMEWORK["2. GROWTH"]["sub_categories"]
         assert "Routes to Scale" in sub_cats
-        assert len(sub_cats["Routes to Scale"]) == 3
+        questions = sub_cats["Routes to Scale"]["questions"]
+        assert len(questions) == 3
 
     def test_playbook_service_returns_framework(self):
         from services.playbook_service import PlaybookService
@@ -322,6 +325,139 @@ class TestModals:
         # Should have 3 inputs: now, next, later
         input_blocks = [b for b in modal["blocks"] if b.get("type") == "input"]
         assert len(input_blocks) == 3
+
+    def test_triage_wizard_modal(self):
+        from blocks.modals import get_triage_wizard_modal
+
+        modal = get_triage_wizard_modal(project_id=42)
+        assert modal["type"] == "modal"
+        assert modal["callback_id"] == "save_triage_submission"
+        assert modal["private_metadata"] == "42"
+        input_blocks = [b for b in modal["blocks"] if b.get("type") == "input"]
+        assert len(input_blocks) == 3
+
+
+# ---------------------------------------------------------------------------
+# Triage Wizard — Context tags filtering
+# ---------------------------------------------------------------------------
+
+
+class TestContextTagsFiltering:
+    def test_framework_sub_categories_have_tags(self):
+        from services.playbook_service import FULL_5_PILLAR_FRAMEWORK
+
+        for pillar_key, pillar_data in FULL_5_PILLAR_FRAMEWORK.items():
+            for sub_cat_name, sub_data in pillar_data["sub_categories"].items():
+                assert "tags" in sub_data, f"{pillar_key} -> {sub_cat_name} missing 'tags'"
+                assert isinstance(sub_data["tags"], list)
+
+    def test_commercial_revenue_sub_category_exists(self):
+        from services.playbook_service import FULL_5_PILLAR_FRAMEWORK
+
+        sub_cats = FULL_5_PILLAR_FRAMEWORK["3. SUSTAINABILITY"]["sub_categories"]
+        assert "Commercial Revenue" in sub_cats
+        assert sub_cats["Commercial Revenue"]["tags"] == ["commercial"]
+
+    def test_audit_view_filters_sub_categories_by_tags(self):
+        """Only tagged sub-categories matching context_tags should appear."""
+        from blocks.home_tab import get_home_view
+        from services.playbook_service import PlaybookService
+
+        service = PlaybookService()
+        project = {
+            "id": 1,
+            "name": "Test Project",
+            "flow_stage": "audit",
+            "assumptions": [],
+            "experiments": [],
+            "members": [],
+            "integrations": {},
+            "channel_id": None,
+            "roadmap_plans": [],
+            "context_tags": ["policy", "public"],
+        }
+        view = get_home_view(
+            "U123",
+            project,
+            all_projects=[{"id": 1, "name": "Test Project"}],
+            playbook_service=service,
+        )
+        all_text = " ".join(
+            block.get("text", {}).get("text", "")
+            for block in view["blocks"]
+            if block.get("type") == "section"
+        )
+        # System Integration (tags: policy, service) should appear for policy context
+        assert "System Integration" in all_text
+        # Commercial Revenue (tags: commercial) should NOT appear for policy context
+        assert "Commercial Revenue" not in all_text
+
+    def test_audit_view_shows_universal_sub_categories(self):
+        """Sub-categories with empty tags should always appear."""
+        from blocks.home_tab import get_home_view
+        from services.playbook_service import PlaybookService
+
+        service = PlaybookService()
+        project = {
+            "id": 1,
+            "name": "Test Project",
+            "flow_stage": "audit",
+            "assumptions": [],
+            "experiments": [],
+            "members": [],
+            "integrations": {},
+            "channel_id": None,
+            "roadmap_plans": [],
+            "context_tags": ["commercial"],
+        }
+        view = get_home_view(
+            "U123",
+            project,
+            all_projects=[{"id": 1, "name": "Test Project"}],
+            playbook_service=service,
+        )
+        all_text = " ".join(
+            block.get("text", {}).get("text", "")
+            for block in view["blocks"]
+            if block.get("type") == "section"
+        )
+        # Needs & Contribution (tags: []) should always appear
+        assert "Needs & Contribution" in all_text
+        # Commercial Revenue (tags: commercial) should appear
+        assert "Commercial Revenue" in all_text
+
+    def test_configure_context_button_in_audit_view(self):
+        """Audit view should have a ⚙️ Configure Context button."""
+        from blocks.home_tab import get_home_view
+        from services.playbook_service import PlaybookService
+
+        service = PlaybookService()
+        project = {
+            "id": 1,
+            "name": "Test Project",
+            "flow_stage": "audit",
+            "assumptions": [],
+            "experiments": [],
+            "members": [],
+            "integrations": {},
+            "channel_id": None,
+            "roadmap_plans": [],
+            "context_tags": ["policy"],
+        }
+        view = get_home_view(
+            "U123",
+            project,
+            all_projects=[{"id": 1, "name": "Test Project"}],
+            playbook_service=service,
+        )
+        triage_buttons = [
+            el
+            for block in view["blocks"]
+            if block.get("type") == "actions"
+            for el in block.get("elements", [])
+            if el.get("action_id") == "open_triage_wizard"
+        ]
+        assert len(triage_buttons) == 1
 
 
 # ---------------------------------------------------------------------------

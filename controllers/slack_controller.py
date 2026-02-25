@@ -59,6 +59,7 @@ from blocks.modals import (
     get_loading_modal,
     get_new_project_modal,
     get_roadmap_modal,
+    get_triage_wizard_modal,
     invite_member_modal,
     link_channel_modal,
     open_log_assumption_modal,
@@ -507,6 +508,19 @@ def update_home_tab(client, event, logger):  # noqa: ANN001
     try:
         user_id = event["user"]
         _set_active_project_from_channel(user_id, event)
+
+        project = db_service.get_active_project(user_id)
+        if project:
+            current_tags = project.get("context_tags") or []
+            if not current_tags:
+                trigger_id = event.get("trigger_id")
+                if trigger_id:
+                    client.views_open(
+                        trigger_id=trigger_id,
+                        view=get_triage_wizard_modal(project["id"]),
+                    )
+                    return
+
         publish_home_tab_async(client, user_id)
     except Exception as exc:  # noqa: BLE001
         logger.error("Error publishing home tab: %s", exc, exc_info=True)
@@ -516,6 +530,19 @@ def app_home_opened(client, event, logger):  # noqa: ANN001
     try:
         user_id = event["user"]
         _set_active_project_from_channel(user_id, event)
+
+        project = db_service.get_active_project(user_id)
+        if project:
+            current_tags = project.get("context_tags") or []
+            if not current_tags:
+                trigger_id = event.get("trigger_id")
+                if trigger_id:
+                    client.views_open(
+                        trigger_id=trigger_id,
+                        view=get_triage_wizard_modal(project["id"]),
+                    )
+                    return
+
         publish_home_tab_async(client, user_id)
     except Exception as exc:  # noqa: BLE001
         if logger:
@@ -532,6 +559,46 @@ def handle_experiment_page_action(ack, body, client):  # noqa: ANN001
     except (TypeError, ValueError):
         page = 0
     publish_home_tab_async(client, user_id, "overview", experiment_page=max(page, 0))
+
+
+@app.view("save_triage_submission")
+def save_triage_submission(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    try:
+        project_id = int(body["view"]["private_metadata"])
+        values = body["view"]["state"]["values"]
+
+        tags = [
+            values["output_type"]["output_type_value"]["selected_option"]["value"],
+            values["sustainability_model"]["sustainability_model_value"]["selected_option"]["value"],
+        ]
+
+        component_options = (
+            values.get("specific_components", {})
+            .get("specific_components_value", {})
+            .get("selected_options", [])
+        )
+        tags.extend(opt["value"] for opt in component_options)
+
+        db_service.update_project_context_tags(project_id, tags)
+
+        user_id = body["user"]["id"]
+        publish_home_tab_async(client, user_id)
+    except Exception:
+        logger.exception("Failed to save triage submission")
+
+
+@app.action("open_triage_wizard")
+def open_triage_wizard(ack, body, client, logger):  # noqa: ANN001
+    ack()
+    try:
+        project_id = int(body["actions"][0]["value"])
+        client.views_open(
+            trigger_id=body["trigger_id"],
+            view=get_triage_wizard_modal(project_id),
+        )
+    except Exception:
+        logger.exception("Failed to open triage wizard")
 
 
 def publish_home_tab(
