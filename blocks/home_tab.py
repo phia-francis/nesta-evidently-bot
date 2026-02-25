@@ -201,12 +201,25 @@ def _build_diagnostic_answer_lookup(assumptions: list[dict[str, Any]]) -> dict[t
     return lookup
 
 
+def _should_show_sub_category(sub_data: dict | list, context_tags: list[str]) -> bool:
+    """Return True if this sub-category should be shown given the project's context_tags."""
+    if isinstance(sub_data, list):
+        return True  # legacy list format — always show
+    sub_tags = set(sub_data.get("tags", []))
+    if not sub_tags:
+        return True  # universal — always shown
+    current_tags = set(context_tags or [])
+    return bool(sub_tags.intersection(current_tags | {"universal"}))
+
+
 def _get_audit_view(
     *,
     framework: dict[str, dict[str, object]],
     assumptions: list[dict[str, Any]],
+    context_tags: list[str] | None = None,
     blocks: list[dict[str, Any]],
 ) -> None:
+    current_tags = context_tags or []
     answer_lookup = _build_diagnostic_answer_lookup(assumptions)
     for pillar_key, pillar_data in framework.items():
         blocks.append(
@@ -217,6 +230,8 @@ def _get_audit_view(
         )
         sub_categories = pillar_data.get("sub_categories", {})
         for sub_category, sub_data in sub_categories.items():
+            if not _should_show_sub_category(sub_data, current_tags):
+                continue
             blocks.append(
                 {
                     "type": "section",
@@ -265,8 +280,10 @@ def _render_framework_sections(
     assumptions: list[dict[str, Any]],
     roadmap_plans: dict[tuple[str, str], dict[str, Any]],
     roadmap_horizons: list[dict[str, str]],
+    context_tags: list[str] | None = None,
     blocks: list[dict[str, Any]],
 ) -> None:
+    current_tags = context_tags or []
     horizon_order = [item["key"] for item in roadmap_horizons]
     horizon_labels = {item["key"]: item["label"] for item in roadmap_horizons}
     for pillar_key, pillar_data in framework.items():
@@ -278,6 +295,8 @@ def _render_framework_sections(
         )
         sub_categories = pillar_data.get("sub_categories", {})
         for sub_category, sub_data in sub_categories.items():
+            if not _should_show_sub_category(sub_data, current_tags):
+                continue
             blocks.append(
                 {
                     "type": "section",
@@ -498,6 +517,13 @@ def get_home_view(
     )
 
     if flow_stage == "audit":
+        context_tags = project.get("context_tags") or []
+        audit_action_elements = [
+            _safe_button("📝 Run Diagnostic", "action_open_diagnostic", style="primary"),
+            _safe_button("✨ Auto-Fill with AI", "auto_fill_from_evidence"),
+            _safe_button("➕ Add Assumption", "open_add_assumption"),
+            _safe_button("🔄 Refresh", "refresh_home"),
+        ]
         blocks.extend(
             [
                 {
@@ -511,11 +537,17 @@ def get_home_view(
                 },
                 {
                     "type": "actions",
+                    "elements": audit_action_elements,
+                },
+                {
+                    "type": "actions",
                     "elements": [
-                        _safe_button("📝 Run Diagnostic", "action_open_diagnostic", style="primary"),
-                        _safe_button("✨ Auto-Fill with AI", "auto_fill_from_evidence"),
-                        _safe_button("➕ Add Assumption", "open_add_assumption"),
-                        _safe_button("🔄 Refresh", "refresh_home"),
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "⚙️ Configure Context"},
+                            "action_id": "open_triage_wizard",
+                            "value": str(project["id"]),
+                        }
                     ],
                 },
                 {"type": "divider"},
@@ -526,6 +558,7 @@ def get_home_view(
         _get_audit_view(
             framework=framework,
             assumptions=assumptions,
+            context_tags=context_tags,
             blocks=blocks,
         )
 
@@ -570,6 +603,7 @@ def get_home_view(
             assumptions=assumptions,
             roadmap_plans=roadmap_plans,
             roadmap_horizons=roadmap_horizons,
+            context_tags=project.get("context_tags") or [],
             blocks=blocks,
         )
 

@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import logging
 import os
 import secrets
@@ -109,6 +110,7 @@ class Project(Base):
     google_refresh_token = Column(Text, nullable=True)
     token_expiry = Column(DateTime, nullable=True)
     dashboard_message_ts = Column(String(50), nullable=True)
+    context_tags = Column(JSON, default=list)
 
     integrations = Column(
         JSON,
@@ -1274,6 +1276,15 @@ class DbService:
             project.flow_stage = flow_stage
             db.commit()
 
+    def update_project_context_tags(self, project_id: int, tags: list[str]) -> None:
+        """Persist context tags selected in the Triage Wizard."""
+        with SessionLocal() as db:
+            db.execute(
+                text("UPDATE projects SET context_tags = :tags WHERE id = :id"),
+                {"tags": json.dumps(tags), "id": project_id},
+            )
+            db.commit()
+
     def update_assumption_confidence_score(self, assumption_id: int, confidence_score: int) -> None:
         self.update_assumption(assumption_id, {"confidence_score": confidence_score})
 
@@ -1539,6 +1550,7 @@ class DbService:
             "channel_id": project.channel_id,
             "created_by": project.created_by,
             "dashboard_message_ts": project.dashboard_message_ts,
+            "context_tags": project.context_tags or [],
             "integrations": project.integrations,
             "assumptions": [self._serialize_assumption(a) for a in project.assumptions],
             "experiments": [self._serialize_experiment(exp) for exp in project.experiments],

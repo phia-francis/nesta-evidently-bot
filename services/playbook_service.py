@@ -4,62 +4,91 @@ from pathlib import Path
 
 FULL_5_PILLAR_FRAMEWORK = {
     "1. VALUE": {
-        "definition": "How does this specific intervention move the needle on the 2030 Mission Goal?",
+        "definition": "How does this intervention move the needle on the 2030 Mission Goal?",
         "sub_categories": {
-            "Needs & Contribution": [
-                "Contribution: How does this intervention directly impact the 2030 Mission Goal (e.g., halving obesity, reducing carbon emissions)?",
-                "Target Beneficiary: Are we reaching the specific target demographic defined in the Area of Focus (AoF)?",
-                "Evidence Gap: Does this fill a critical evidence gap in our Theory of Change, or are we replicating existing knowledge?",
-            ]
+            "Needs & Contribution": {
+                "tags": [],  # universal — always shown
+                "questions": [
+                    "Contribution: How does this directly impact the 2030 Mission Goal?",
+                    "Target Beneficiary: Are we reaching the target demographic defined in the AoF?",
+                    "Evidence Gap: Does this fill a critical gap in our Theory of Change?",
+                ],
+            }
         },
     },
     "2. GROWTH": {
         "definition": "What are the routes to adoption and scaling?",
         "sub_categories": {
-            "Routes to Scale": [
-                "Scaling Mode: Which Nesta scaling mode does this fit: Influencing, Enabling, or Delivering?",
-                "Adoption Levers: What is the specific lever for adoption? (e.g., legislative change, supply chain incentive, behavioural nudge)",
-                "Replicability: Can this model work in a different local authority or context without significant reinvention?",
-            ]
+            "Routes to Scale": {
+                "tags": [],
+                "questions": [
+                    "Scaling Mode: Which Nesta mode — Influencing, Enabling, or Delivering?",
+                    "Adoption Levers: What is the specific lever? (e.g., legislative change, behavioural nudge)",
+                    "Replicability: Can this work in a different context without significant reinvention?",
+                ],
+            }
         },
     },
     "3. SUSTAINABILITY": {
         "definition": "How does this integrate into the wider system long-term?",
         "sub_categories": {
-            "System Integration": [
-                "System Ownership: Who owns this problem after Nesta steps away? (e.g., Local Authority, NHS, private market)",
-                "Cost-Benefit: Does the intervention save money for the system owner to justify long-term funding?",
-                "Exit Strategy: Is the sustainability plan based on commercial revenue (Venture) or public commissioning (Programme)?",
-            ],
-            "Intellectual Property (IP)": [
-                "New IP: Is there potential to create new IP? How will you protect it?",
-                "Existing IP: What existing IP are you exploiting?",
-                "Licensing: Can licensing create additional value or protection?",
-            ],
+            "System Integration": {
+                "tags": ["policy", "service"],
+                "questions": [
+                    "System Ownership: Who owns this after Nesta steps away?",
+                    "Cost-Benefit: Does the intervention save money for the system owner?",
+                    "Exit Strategy: Is sustainability based on commercial revenue or public commissioning?",
+                ],
+            },
+            "Commercial Revenue": {
+                "tags": ["commercial"],
+                "questions": [
+                    "Revenue Model: What is the primary revenue mechanism?",
+                    "Unit Economics: Are the margins viable at scale?",
+                    "Market Size: Is the addressable market large enough to sustain the model?",
+                ],
+            },
+            "Intellectual Property (IP)": {
+                "tags": ["product", "digital"],
+                "questions": [
+                    "New IP: Is there potential to create new IP? How will you protect it?",
+                    "Existing IP: What existing IP are you exploiting?",
+                    "Licensing: Can licensing create additional value or protection?",
+                ],
+            },
         },
     },
     "4. IMPACT": {
         "definition": "What are the unintended consequences and equity impacts?",
         "sub_categories": {
-            "Equity & Risk": [
-                "Equity Audit: Does this intervention unintentionally widen inequalities?",
-                "Displacement: Does success here negatively impact another part of the system?",
-                "Data Integrity: Can we capture rigorous impact data in a way that satisfies our Mission Progress Indicators?",
-            ]
+            "Equity & Risk": {
+                "tags": [],
+                "questions": [
+                    "Equity Audit: Does this unintentionally widen inequalities?",
+                    "Displacement: Does success here negatively impact another part of the system?",
+                    "Data Integrity: Can we capture rigorous impact data satisfying Mission Progress Indicators?",
+                ],
+            }
         },
     },
     "5. FEASIBILITY": {
         "definition": "Do we have the internal and external capabilities to execute?",
         "sub_categories": {
-            "Capabilities & Timing": [
-                "Partnership Fit: Do we have the right 'Gold Policy Stakeholders' engaged to unblock barriers?",
-                "Internal Capability: Does this require Mission Studio venture building skills or Discovery research skills?",
-                "Political Timing: Is the external policy environment currently receptive to this change?",
-            ],
-            "R&D & Design": [
-                "Design: What prototyping/testing capabilities exist? How are users involved in the design process?",
-                "Technology: How will technical challenges be solved?",
-            ],
+            "Capabilities & Timing": {
+                "tags": [],
+                "questions": [
+                    "Partnership Fit: Do we have the right policy stakeholders engaged?",
+                    "Internal Capability: Does this require venture building or Discovery research skills?",
+                    "Political Timing: Is the external policy environment receptive?",
+                ],
+            },
+            "R&D & Design": {
+                "tags": ["product", "digital", "data"],
+                "questions": [
+                    "Design: What prototyping/testing capabilities exist? How are users involved?",
+                    "Technology: How will technical challenges be solved?",
+                ],
+            },
         },
     },
 }
